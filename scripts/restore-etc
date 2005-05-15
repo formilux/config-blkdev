@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# This script unmounts /etc, mounts a ramfs onto it, and extracts
+# /flash/cfg/config.{cur,bak,fac} into it.
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+FLASH=/flash/cfg
+FILE=/etc/.restored
+FORCE=0
+VERBOSE=0
+
+while [ $# -gt 0 ]; do
+  if [ ".$1" = ".-f" ]; then FORCE=1
+  elif [ ".$1" = ".-v" ]; then VERBOSE=1
+  else
+    echo "Unknown argument: $1"
+  fi
+  shift
+done
+
+if [ $VERBOSE -eq 1 ]; then
+  echo "List of files modified since last backup."
+  flx check --ignore-dot fs:/etc file:$FILE | grep -vwF "${FILE#/}"
+  exit 0
+fi
+
+if [ $FORCE -eq 0 -a -e $FILE ] && \
+   [ $(flx check --ignore-dot fs:/etc file:$FILE | grep -cvwF "${FILE#/}") -gt 0 ]; then
+  echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
+  exit 1;
+fi 
+
+for config in $FLASH/config.cur $FLASH/config.bak $FLASH/config.fac; do
+  if [ -s $config ] && [ $(tar ztf $config 2>/dev/null|wc -l) -gt 0 ]; then
+    if [ -e /etc/passwd ]; then
+      umount /etc >/dev/null 2>&1
+    fi
+    mount -t ramfs /etc /etc
+    tar -C /etc --strip-components=1 -zxf $config >/dev/null 2>&1
+    if [ $? -eq 0 -a -s /etc/passwd ]; then
+      rm -f $FILE ; touch $FILE ; chmod 600 $FILE
+      flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE
+      echo ${config##*/}
+      exit 0
+    fi
+    umount /etc >/dev/null 2>&1
+  fi
+done
+exit 1
