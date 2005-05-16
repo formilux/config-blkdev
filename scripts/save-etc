@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# This script unmounts /etc, mounts a ramfs onto it, and extracts
+# /flash/cfg/config.{cur,bak,fac} into it.
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+FLASH=/flash
+FLASH_CFG=$FLASH/cfg
+FILE=/etc/.restored
+FORCE=0
+VERBOSE=0
+
+while [ $# -gt 0 ]; do
+  if [ ".$1" = ".-f" ]; then FORCE=1
+  elif [ ".$1" = ".-v" ]; then VERBOSE=1
+  else
+    echo "Unknown argument: $1"
+  fi
+  shift
+done
+
+if [ $VERBOSE -eq 1 ]; then
+  echo "List of files modified since last backup."
+  if [ -s $FILE ]; then
+     flx check --ignore-dot fs:/etc file:$FILE | grep -vwF "${FILE#/}"
+     exit 0
+  else
+     echo "Backup log does not exist."
+     exit 1
+  fi
+fi
+
+if [ $FORCE -eq 0 -a -e $FILE ] && \
+   [ $(flx check --ignore-dot fs:/etc file:$FILE | grep -cvwF "${FILE#/}") -eq 0 ]; then
+  echo "Nothing changed since last backup. Use '-f' if you want to force."
+  exit 1;
+fi 
+
+remountw $FLASH
+rm -f $FLASH_CFG/config.new
+touch $FLASH_CFG/config.new ; chmod 600 $FLASH_CFG/config.new
+tar -C / --one-file-system --exclude=${FILE#/} -c etc | \
+  gzip -9 >$FLASH_CFG/config.new
+if [ ! -s $FLASH_CFG/config.new ]; then
+  rm -f $FLASH_CFG/config.new
+  remountr $FLASH
+  echo "Problem saving config to flash."
+  exit 1
+fi
+
+mv $FLASH_CFG/config.{cur,bak} 2>/dev/null
+if ! mv $FLASH_CFG/config.{new,cur} 2>/dev/null; then
+  rm -f $FLASH_CFG/config.new
+  remountr $FLASH
+  echo "Problem saving config to flash."
+  exit 1
+fi
+remountr $FLASH
+
+( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
+( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) 2>&1
+exit 0
