@@ -1,62 +1,162 @@
 #!/bin/bash
 
-# This script unmounts /etc, mounts a ramfs onto it, and extracts
-# /flash/cfg/config.{cur,bak,fac} into it.
+# This script saves /etc onto the flash and writes a signature so that
+# it will be able to check whether files have changed next time.
+
+# get out of /flash and /etc just in case.
+cd /
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-FLASH=/flash
-FLASH_CFG=$FLASH/cfg
+FLASHDIR=/flash
+FLASHCFG=$FLASHDIR/cfg
 FILE=/etc/.restored
+EXCLUDE=/usr/share/factory/ignore-files
+REFERENCE=/usr/share/factory/base-etc
 FORCE=0
 VERBOSE=0
+STDOUT=0
+QUIET=0
+
+# Mounts the flash reaw/write in $FLASHDIR.
+# This checks /proc/cmdline for the LAST 'flash=' statement, and
+# uses its value as a /dev entry to mount it read-only into $FLASHDIR.
+# Returns 0 if OK, 1 otherwise.
+# DOES NOT unmounts $FLASHDIR first if previously mounted, but returns with
+# an error indicating a resource access conflict.
+mount_flash_rw() {
+  local flash
+  flash="$(cat /proc/cmdline)"
+  if [ -n "${flash##*flash=*}" ]; then
+    [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
+    return 1
+  fi
+  flash=${flash##*flash=}
+  flash=${flash%% *}
+  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
+  if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
+    rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+    [ $QUIET -eq 0 ] && echo "Error: mount failed."
+    return 1
+  fi
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  return 0
+}
+
+# unmounts /flash
+umount_flash() {
+  if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+    cd /
+    if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+      [ $QUIET -eq 0 ] && echo "Error: cannot unmount $FLASHDIR"
+      return 1
+    else
+      [ $QUIET -eq 0 ] && echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+    fi
+  fi
+  return 0
+}
+
+# makes an archive from files in /etc which differ from the factory config,
+# except for directories and the files we don't want to save, then exports
+# it to stdout.
+archive_etc() {
+  flx check --ignore-dot --ignore-link --ignore-date $REFERENCE=etc /etc=etc \
+    | awk '/^[+>]/ { print $9 }' \
+    | tar -C / -T - --one-file-system --numeric-owner --exclude-from $EXCLUDE -cf - \
+    | gzip -c9
+}
+
+
+# Checks what has changed since last backup. We need to use 'tar cf' because
+# we want to benefit from tar's ability to exclude files from another file.
+# The changed files are listed on stdout, relative to /.
+# WARNING! because it uses tar, it does not detect removed files.
+list_changes() {
+  if [ -r "$FILE" ]; then
+    flx check --ignore-dot --ignore-link --ignore-date file:$FILE fs:/etc \
+      | awk '/^[+>]/ { print $9 }' \
+      | tar -C / -T - --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+  else
+      tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
+  fi
+}
+
+#  
+# main
+#
 
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
+  elif [ ".$1" = ".-q" ]; then QUIET=1
+  elif [ ".$1" = ".-s" ]; then STDOUT=1
   else
     echo "Unknown argument: $1"
+    echo "Valid options are :"
+    echo "  -f : force write even if up-to-date ;"
+    echo "  -v : only check whether files have been modified ;"
+    echo "  -q : suppress any message. With -v, return non-0 if unsaved changes exist ;"
+    echo "  -s : dump archive to stdout instead of flash."
+    exit 1
   fi
   shift
 done
 
 if [ $VERBOSE -eq 1 ]; then
-  echo "List of files modified since last backup."
   if [ -s $FILE ]; then
-     flx check --ignore-dot fs:/etc file:$FILE | grep -vwF "${FILE#/}"
-     exit 0
+    if [ $QUIET -eq 1 ]; then
+       if [ $(list_changes | wc -l) -eq 0 ]; then
+         # nothing to save
+         exit 0
+       else
+         # unsaved changes
+         exit 1
+       fi
+    fi
+    [ $QUIET -eq 0 ] && echo "List of files modified since last backup :"
+    list_changes
+    exit 0
   else
-     echo "Backup log does not exist."
-     exit 1
+    [ $QUIET -eq 0 ] && echo "Backup log does not exist."
+    exit 1
   fi
 fi
 
-if [ $FORCE -eq 0 -a -e $FILE ] && \
-   [ $(flx check --ignore-dot fs:/etc file:$FILE | grep -cvwF "${FILE#/}") -eq 0 ]; then
-  echo "Nothing changed since last backup. Use '-f' if you want to force."
+if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a -e $FILE ] && \
+  [ $(list_changes | wc -l) -eq 0 ]; then
+  [ $QUIET -eq 0 ] && echo "Nothing changed since last backup. Use '-f' if you want to force."
   exit 1;
 fi 
 
-remountw $FLASH
-rm -f $FLASH_CFG/config.new
-touch $FLASH_CFG/config.new ; chmod 600 $FLASH_CFG/config.new
-tar -C / --one-file-system --exclude=${FILE#/} -c etc | \
-  gzip -9 >$FLASH_CFG/config.new
-if [ ! -s $FLASH_CFG/config.new ]; then
-  rm -f $FLASH_CFG/config.new
-  remountr $FLASH
-  echo "Problem saving config to flash."
+if [ $STDOUT -eq 0 ]; then
+  mount_flash_rw || exit 1
+
+  rm -f $FLASHCFG/config.new
+  touch $FLASHCFG/config.new ; chmod 600 $FLASHCFG/config.new
+  archive_etc >$FLASHCFG/config.new
+else
+  archive_etc
+  exit 0
+fi
+
+if [ ! -s $FLASHCFG/config.new ]; then
+  rm -f $FLASHCFG/config.new
+  umount_flash
+  [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
   exit 1
 fi
 
-mv $FLASH_CFG/config.{cur,bak} 2>/dev/null
-if ! mv $FLASH_CFG/config.{new,cur} 2>/dev/null; then
-  rm -f $FLASH_CFG/config.new
-  remountr $FLASH
-  echo "Problem saving config to flash."
+mv $FLASHCFG/config.{cur,bak} 2>/dev/null
+if ! mv $FLASHCFG/config.{new,cur} 2>/dev/null; then
+  rm -f $FLASHCFG/config.new
+  umount_flash
+  [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
   exit 1
 fi
-remountr $FLASH
+umount_flash
 
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
-( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) 2>&1
+( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) 2>/dev/null
 exit 0

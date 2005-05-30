@@ -1,22 +1,83 @@
 #!/bin/bash
 
 # This script unmounts /etc, mounts a ramfs onto it, and extracts
-# /flash/cfg/config.{cur,bak,fac} into it.
+# /flash/cfg/config.{cur,bak,fac} into it. If an argument is passed, it will be
+# used as a local config file and the restoration will proceed from this file.
+# Note: this script checks the existence of /etc/config.rc in order to detect
+# if a previous config had already been loaded.
+
+# get out of /flash and /etc just in case.
+cd /
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
-FLASH=/flash/cfg
+FLASHDIR=/flash
+FLASHCFG=${FLASHDIR}/cfg
 FILE=/etc/.restored
+EXCLUDE=/usr/share/factory/ignore-files
+REFERENCE=/usr/share/factory/base-etc
 FORCE=0
 VERBOSE=0
+CFGFILE=
+
+# Mounts the flash in $FLASHDIR.
+# This checks /proc/cmdline for the LAST 'flash=' statement, and
+# uses its value as a /dev entry to mount it read-only into $FLASHDIR.
+# Returns 0 if OK, 1 otherwise.
+# DOES NOT unmounts $FLASHDIR first if previously mounted, but returns with
+# an error indicating a resource access conflict.
+mount_flash_ro() {
+  local flash
+  flash="$(cat /proc/cmdline)"
+  if [ -n "${flash##*flash=*}" ]; then
+    echo "No flash device specified in /proc/cmdline."
+    return 1
+  fi
+  flash=${flash##*flash=}
+  flash=${flash%% *}
+  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  echo "Mounting ${flash} on $FLASHDIR..."
+  if ! mount -n -r $flash $FLASHDIR >/dev/null 2>&1; then
+    echo "Error: mount failed."
+    return 1
+  fi
+  return 0
+}
+
+# unmounts /flash
+umount_flash() {
+  if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+    cd /
+    if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+      echo "Error: cannot unmount $FLASHDIR"
+      return 1
+    else
+      echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+    fi
+  fi
+  return 0
+}
 
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
-  else
+  elif [ -z "${1##-*}" ]; then
     echo "Unknown argument: $1"
+    echo "Valid options are :"
+    echo "  -f : force update and ignore local changes ;"
+    echo "  -v : only check whether files have been modified ;"
+    echo "  <file> : restore from this file instead of flash."
+    exit 1
+  else
+    break
   fi
   shift
 done
+
+if [ $# -gt 0 ]; then
+  CFGFILE="$1"
+  shift
+fi
 
 if [ $VERBOSE -eq 1 ]; then
   echo "List of files modified since last backup."
@@ -30,20 +91,59 @@ if [ $FORCE -eq 0 -a -e $FILE ] && \
   exit 1;
 fi 
 
-for config in $FLASH/config.cur $FLASH/config.bak $FLASH/config.fac; do
-  if [ -s $config ] && [ $(tar ztf $config 2>/dev/null|wc -l) -gt 0 ]; then
-    if [ -e /etc/passwd ]; then
-      umount /etc >/dev/null 2>&1
+# restore from local file ?
+if [ -n "$CFGFILE" ]; then
+  if [ -s "$CFGFILE" ] && [ $(tar ztf "$CFGFILE" 2>/dev/null|wc -l) -gt 0 ]; then
+    if [ -e /etc/config.rc ]; then
+      while umount /etc >/dev/null 2>&1; do : ; done
     fi
-    mount -t ramfs /etc /etc
-    tar -C /etc --strip-components=1 -zxf $config >/dev/null 2>&1
-    if [ $? -eq 0 -a -s /etc/passwd ]; then
-      rm -f $FILE ; touch $FILE ; chmod 600 $FILE
-      flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE
-      echo ${config##*/}
+
+    mount -n -t ramfs /etc /etc
+    (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$CFGFILE" >/dev/null 2>&1
+    # ignore the return code, because some files may come with extra CR/LF.
+    if [ -s /etc/config.rc ]; then
+      ( rm -f /etc/blkid.tab{,.old}; \
+        rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
+        flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
+      echo "$CFGFILE"
       exit 0
     fi
-    umount /etc >/dev/null 2>&1
+    while umount /etc >/dev/null 2>&1; do : ; done
   fi
-done
+fi
+
+# if we get any error there, we try to restore the flash configuration.
+if mount_flash_ro; then
+  for config in $FLASHCFG/config.cur $FLASHCFG/config.bak $FLASHCFG/config.fac
+  do
+    if [ -s $config ] && [ $(tar ztf $config 2>/dev/null|wc -l) -gt 0 ]; then
+      if [ -e /etc/config.rc ]; then
+        while umount /etc >/dev/null 2>&1; do : ; done
+      fi
+      mount -n -t ramfs /etc /etc
+      (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+      tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
+      if [ $? -eq 0 -a -s /etc/config.rc ]; then
+        umount_flash
+        ( rm -f /etc/blkid.tab{,.old}; \
+          rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
+          flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
+        echo ${config##*/}
+        exit 0
+      fi
+      while umount /etc >/dev/null 2>&1; do : ; done
+    fi
+  done
+  umount_flash
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+fi
+
+# We have not found any config, so we'll build /etc from the reference etc
+# directory into a ramfs anyway so that we get a read/write /etc.
+mount -n -t ramfs /etc /etc 2>/dev/null || exit 1  # already mounted
+(tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
+( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
+rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
 exit 1
