@@ -1,0 +1,107 @@
+Fonctionnement des upgrades de versions et conf sur Formilux - 2005/06/24 - WT
+
+1) présentation
+---------------
+
+La flash est coupée en 3 partitions : 
+ - bootloader + firmware (jamais montée)
+ - system + config (/flash, read-only sauf pendant les upgrade et modifs)
+ - /nv toujours en RW, sachant qu'on peut tout perdre
+   (ex: signatures)
+
+Le boot-loader trouve tout seul la bonne image système sur et l'identifiant
+de la partition /flash.
+
+ATTENTION à la terminologie :
+
+ - on appelle "firmware" le code qui est chargé dans la boîte, qu'on ne met
+   jamais à jour, et sans lequel on a besoin du tournevis. C'est le "pre-boot"
+   qui n'est jamais monté. Il peut être bourré de trous de sécu, on s'en fout
+   car ce n'est pas lui qui tourne, il ne sert qu'à booter. Il faut juste qu'il
+   fonctionne pour les faibles usages qu'on en attend.
+
+ - on appelle "système" le code qui est mis régulièrement à jour, qu'on trouve
+   dans '/flash/sys', et qu'on peut recharger depuis le firmware. Celui-ci fait
+   fonctionner le service et DOIT être mis à jour.
+
+ - pour l'utilisateur final, les deux sont des firmwares, l'un l'image de boot
+   et l'autre l'image système. D'où la raison pour laquelle il faudrait qu'on
+   stocke ça dans le répertoire "firmware" sur le site web.
+
+2) les images système
+---------------------
+
+Les images système se trouvent dans /flash/sys et les configs dans /flash/cfg.
+Les images système sont signées (intégrité uniquement) éclatées en plusieurs
+fichiers présents dans deux répertoires :
+  /flash/sys/active
+  /flash/sys/backup
+
+Elles sont transportées au format tar.gz incluant un numéro de version, et
+portant l'extension ".bin". Ex: 
+
+$ tar ztvf ld-250-1.0.0-build-0042.bin
+drwxr-xr-x root/root         0 2005-05-26 19:32:08 ld-250-1.0.0-build-0042/
+-rw-r--r-- root/root         0 2005-05-26 19:30:04 ld-250-1.0.0-build-0042/kernel.arg
+-rw-r----- root/root   1584980 2005-05-26 19:30:04 ld-250-1.0.0-build-0042/kernel.img
+-rw-r--r-- root/root        18 2005-05-26 19:30:04 ld-250-1.0.0-build-0042/kernel.ver
+-rw-rw-r-- root/root       180 2005-05-26 19:32:08 ld-250-1.0.0-build-0042/system.sig
+-rwx------ root/root   8171520 2005-05-26 19:30:04 ld-250-1.0.0-build-0042/initrd.img
+
+Pour les manipuler, soit on utilise le mini-shell présent dans le firmware,
+soit on utilise le script 'update-boot-image' (installé dans /sbin) auquel
+on passe en paramètre l'image au format tar.gz. Ce script se charge d'un
+maximum de tests d'intégrité, de place sur le file-system, etc... et se
+débrouille avec les montages/démontages RW de /flash. Il supporte quelques
+paramètres documentés dedans suivant le mode de fonctionnement souhaité.
+
+Il ne retourne 0 que si TOUT s'est bien déroulé, sinon il retourne un code
+(documenté) décrivant le problème, afin de permettre à l'interface utilisateur
+de savoir si elle peut proposer un retry ou un reboot à l'admin.
+
+3) les configs
+--------------
+
+Le file-system '/' embarque un répertoire /etc garni avec les fichiers par
+défaut ("conf usine"). Ceux-ci étant sur un FS read-only, ils ne sont pas
+modifiables. En temps normal, la conf se trouve dans un ramfs monté dans
+/etc durant le boot. Les modifs de configuration sont donc uniquement faites
+en RAM, et pour les sauver, on sauve tout /etc dans '/flash/cfg/config.cur'
+au format tar.gz. Si le fichier existait déjà, il est renommé en 'config.bak'.
+
+Le fichier config.cur est automatiquement lu au démarrage et monté dans /etc,
+grâce au script '/sbin/restore-etc'. Ce dernier tente de décompresser à tour
+de rôle 'config.cur', 'config.bak', 'config.fac' (ce dernier permettant de
+fournir une autre config usine ("factory") si besoin.
+
+Dès chargement d'une conf dans /etc, la signature flx de /etc est immédiatement
+sauvée dans '/etc/.restored'. Lors d'un prochain appel à restore-etc, le script
+refusera de se lancer (sauf option '-f') si la signature montre que des modifs
+locales ont eu lieu.
+
+Le script "/sbin/save-etc" fait l'opération inverse, à savoir appliquer une
+signature sur /etc si elle n'existe pas, et sauver le tout dans config.cur.
+Ignorer l'erreur de "read-only FS" sur /etc/.restored si le FS était monté
+en RO.
+
+Pour construire une image de config et monter /etc en RW lors du premier boot
+en config usine, il suffit donc de faire une sauvegarde puis une restauration.
+Idéalement, le rc.S s'en chargera plus tard si /etc n'est pas en RW dès le boot.
+
+Il reste à faire un script "update-cfg-image" ou un truc comme ça par similitude
+avec "update-boot-image" pour envoyer une conf à prendre pour le prochain reboot.
+Mais déjà en un premier temps, si on ne gère pas de backup de conf, il suffit de
+prendre/déposer le fichier "/flash/cfg/config.cur" pour manipuler la config.
+
+4) outils
+---------
+
+par rapport à un flx standard, les choses suivantes changent :
+
+- ajout de "/sbin/mount-nv" à la fin de /sbin/rc.S
+- ajout des scripts validate-boot, save-etc, restore-etc, mount-nv,
+  mount-flash, update-boot-image dans /sbin
+- /flash
+
+
+-- fin --
