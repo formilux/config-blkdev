@@ -18,6 +18,7 @@ REFERENCE=/usr/share/factory/base-etc
 FORCE=0
 VERBOSE=0
 CFGFILE=
+MOUNTOPT="size=2m"
 
 # Mounts the flash in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -98,7 +99,8 @@ if [ -n "$CFGFILE" ]; then
       while umount /etc >/dev/null 2>&1; do : ; done
     fi
 
-    mount -n -t ramfs /etc /etc
+    mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+      mount -n -t ramfs /etc /etc
     (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
     tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$CFGFILE" >/dev/null 2>&1
     # ignore the return code, because some files may come with extra CR/LF.
@@ -121,7 +123,8 @@ if mount_flash_ro; then
       if [ -e /etc/config.rc ]; then
         while umount /etc >/dev/null 2>&1; do : ; done
       fi
-      mount -n -t ramfs /etc /etc
+      mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+        mount -n -t ramfs /etc /etc
       (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
       tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
       if [ $? -eq 0 -a -s /etc/config.rc ]; then
@@ -141,7 +144,8 @@ fi
 
 # We have not found any config, so we'll build /etc from the reference etc
 # directory into a ramfs anyway so that we get a read/write /etc.
-mount -n -t ramfs /etc /etc 2>/dev/null || exit 1  # already mounted
+mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+  mount -n -t ramfs /etc /etc 2>/dev/null || exit 1  # already mounted
 (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
 ( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
