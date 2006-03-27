@@ -16,6 +16,7 @@ FORCE=0
 VERBOSE=0
 STDOUT=0
 QUIET=0
+LIST=0
 
 # Mounts the flash reaw/write in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -64,7 +65,7 @@ umount_flash() {
 archive_etc() {
   flx check --ignore-dot --ignore-link --ignore-date $REFERENCE=etc /etc=etc \
     | awk '/^[+>]/ { print $9 }' \
-    | tar -C / -T - --one-file-system --numeric-owner --exclude-from $EXCLUDE -cf - \
+    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
     | gzip -c9
 }
 
@@ -77,7 +78,7 @@ list_changes() {
   if [ -r "$FILE" ]; then
     flx check --ignore-dot --ignore-link --ignore-date file:$FILE fs:/etc \
       | awk '/^[+>]/ { print $9 }' \
-      | tar -C / -T - --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+      | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
   else
       tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
   fi
@@ -92,11 +93,13 @@ while [ $# -gt 0 ]; do
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
   elif [ ".$1" = ".-q" ]; then QUIET=1
   elif [ ".$1" = ".-s" ]; then STDOUT=1
+  elif [ ".$1" = ".-l" ]; then LIST=1
   else
     echo "Unknown argument: $1"
     echo "Valid options are :"
     echo "  -f : force write even if up-to-date ;"
     echo "  -v : only check whether files have been modified ;"
+    echo "  -l : (with -v) use listing output format (no headers) ;"
     echo "  -q : suppress any message. With -v, return non-0 if unsaved changes exist ;"
     echo "  -s : dump archive to stdout instead of flash."
     exit 1
@@ -106,7 +109,7 @@ done
 
 if [ $VERBOSE -eq 1 ]; then
   if [ -s $FILE ]; then
-    if [ $QUIET -eq 1 ]; then
+    if [ $QUIET -eq 1 -a $LIST -eq 0 ]; then
        if [ $(list_changes | wc -l) -eq 0 ]; then
          # nothing to save
          exit 0
@@ -115,11 +118,11 @@ if [ $VERBOSE -eq 1 ]; then
          exit 1
        fi
     fi
-    [ $QUIET -eq 0 ] && echo "List of files modified since last backup :"
+    [ $LIST -eq 0 ] && echo "List of files modified since last backup :"
     list_changes
     exit 0
   else
-    [ $QUIET -eq 0 ] && echo "Backup log does not exist."
+    [ $LIST -eq 0 ] && echo "Backup log does not exist."
     exit 1
   fi
 fi
