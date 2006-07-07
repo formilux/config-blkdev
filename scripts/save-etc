@@ -118,8 +118,16 @@ if [ $VERBOSE -eq 1 ]; then
          exit 1
        fi
     fi
-    [ $LIST -eq 0 ] && echo "List of files modified since last backup :"
-    list_changes
+    if [ $LIST -eq 0 ]; then
+       if [ $(list_changes | wc -l) -gt 0 ]; then
+         echo "List of files modified since last backup :"
+         list_changes
+       else
+         echo "Nothing changed since last backup."
+       fi
+    else
+      list_changes
+    fi
     exit 0
   else
     [ $LIST -eq 0 ] && echo "Backup log does not exist."
