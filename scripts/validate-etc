@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# This script saves /etc onto the flash and writes a signature so that
+# it will be able to check whether files have changed next time.
+
+# get out of /flash and /etc just in case.
+cd /
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+FLASHDIR=/flash
+FLASHCFG=$FLASHDIR/cfg
+FILE=/etc/.restored
+EXCLUDE=/usr/share/factory/ignore-files
+REFERENCE=/usr/share/factory/base-etc
+FORCE=0
+VERBOSE=0
+STDOUT=0
+QUIET=0
+LIST=0
+_MD5SUM=/bin/md5sum
+
+# Mounts the flash reaw/write in $FLASHDIR.
+# This checks /proc/cmdline for the LAST 'flash=' statement, and
+# uses its value as a /dev entry to mount it read-only into $FLASHDIR.
+# Returns 0 if OK, 1 otherwise.
+# DOES NOT unmounts $FLASHDIR first if previously mounted, but returns with
+# an error indicating a resource access conflict.
+mount_flash_rw() {
+  local flash
+  flash="$(cat /proc/cmdline)"
+  if [ -n "${flash##*flash=*}" ]; then
+    [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
+    return 1
+  fi
+  flash=${flash##*flash=}
+  flash=${flash%% *}
+  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
+  if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
+    rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+    [ $QUIET -eq 0 ] && echo "Error: mount failed."
+    return 1
+  fi
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  return 0
+}
+
+# unmounts /flash
+umount_flash() {
+  if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+    cd /
+    if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+      [ $QUIET -eq 0 ] && echo "Error: cannot unmount $FLASHDIR"
+      return 1
+    else
+      [ $QUIET -eq 0 ] && echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+    fi
+  fi
+  return 0
+}
+
+#
+# main
+#
+
+
+mount_flash_rw
+sig1=""
+sig2=""
+sig3=""
+
+[ -e "$FLASHCFG/config.cur" ] && sig1=$($_MD5SUM "$FLASHCFG/config.cur") ; sig1=${sig1% *}
+[ -e "$FLASHCFG/config.val" ] && sig2=$($_MD5SUM "$FLASHCFG/config.val") ; sig2=${sig2% *}
+[ -e "$FLASHCFG/config.adm" ] && sig3=$($_MD5SUM "$FLASHCFG/config.adm") ; sig3=${sig3% *}
+
+# Validate configuration
+if [  "$sig1" != "$sig2" ] ; then
+	if [ -e "$FLASHCFG/config.cur" ] ; then
+		cp $FLASHCFG/config.{cur,val} 2>/dev/null
+	else
+		rm -rf "$FLASHCFG/config.val" 2>/dev/null
+	fi
+fi
+
+if [ "$sig1" != "$sig3" ] ; then
+	# If configuration is not wanted one, copy bootlog.err on /var/log
+	cp "$FLASHCFG/bootlog.err" "/var/log" 2>/dev/null
+else
+	# If configuration is wanted one , clear bootlog.err
+	rm -f $FLASHCFG/bootlog.err 2>/dev/null
+fi
+
+echo "Configuration saved valid"
+umount_flash
+
+exit 0
