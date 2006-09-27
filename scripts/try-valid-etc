@@ -103,6 +103,7 @@ fi
 # If first error save log
 if [ ! -e "$FLASHCFG/booterr.log" ] ; then
 	echo "Save bootlog about error"
+	sync
 	cp "/var/log/bootlog" "$FLASHCFG/bootlog.err" 2>/dev/null
 fi
 
