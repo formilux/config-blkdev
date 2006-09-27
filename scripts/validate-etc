@@ -86,6 +86,7 @@ fi
 if [ "$sig1" != "$sig3" ] ; then
 	# If configuration is not wanted one, copy bootlog.err on /var/log
 	cp "$FLASHCFG/bootlog.err" "/var/log" 2>/dev/null
+	cp "$FLASHCFG/config.adm" "/tmp/config.err" 2>/dev/null
 else
 	# If configuration is wanted one , clear bootlog.err
 	rm -f $FLASHCFG/bootlog.err 2>/dev/null
