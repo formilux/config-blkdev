@@ -71,27 +71,36 @@ sig2=""
 [ -e "$FLASHCFG/config.cur" ] && sig1=$($_MD5SUM "$FLASHCFG/config.cur") ; sig1=${sig1% *}
 [ -e "$FLASHCFG/config.val" ] && sig2=$($_MD5SUM "$FLASHCFG/config.val") ; sig2=${sig2% *}
 
-if [ -z "$sig1" -a -z "$sig2" ] ; then
+# Case of factory default boot failure
+if [ -z "$sig1"  ] ; then
 	echo "Factory default configuration boot failure, switch on other firmware"
+	# prepare saved config for next firmware
+	cp $FLASHCFG/config.{adm,cur} 2>/dev/nul
 	umount_flash
-	exit 1
+	# exit code 3 to signal app to try next firmware
+	exit 3
 fi
 
+# Case current configuration is last valid known
 if [  "$sig1" = "$sig2" ] ; then
 	echo "Valid configuration boot failure."
 	echo "Retry on factory default configuration."
-	rm -f "$FLASHCFG/config.val" 2>/dev/null
+	# retry factory default
 	rm -f "$FLASHCFG/config.cur" 2>/dev/null
+# Else current configuration is NOT last valid known
 else
+	# If a last valid configuration known exists try it
 	if [ -e "$FLASHCFG/config.val" ] ; then
 		echo "Retry on previous valid configuration."
 		cp $FLASHCFG/config.{val,cur} 2>/dev/null
+	# Else try factory defaults
 	else
 		echo "Retry on factory default configuration."
 		rm -f "$FLASHCFG/config.cur" 2>/dev/null 
 	fi
 fi
 
+# If first error save log
 if [ ! -e "$FLASHCFG/booterr.log" ] ; then
 	echo "Save bootlog about error"
 	cp "/var/log/bootlog" "$FLASHCFG/bootlog.err" 2>/dev/null
