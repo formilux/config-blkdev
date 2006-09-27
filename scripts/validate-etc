@@ -75,7 +75,7 @@ sig3=""
 [ -e "$FLASHCFG/config.adm" ] && sig3=$($_MD5SUM "$FLASHCFG/config.adm") ; sig3=${sig3% *}
 
 # if wanted configuration is current save it as valid
-if [ "$sig1" = "$sig3" ] ; then
+if [ "$sig1" = "$sig3" -o -z "$sig3" ] ; then
 	[ "$sig1" != "$sig2" ] && cp $FLASHCFG/config.{cur,val} 2>/dev/null
 	[ -e "$FLASHCFG/bootlog.err" ] && rm -f "$FLASHCFG/bootlog.err" 2>/dev/null
 	echo "Configuration saved is valid"
