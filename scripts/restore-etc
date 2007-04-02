@@ -59,6 +59,20 @@ umount_flash() {
   return 0
 }
 
+# Checks what has changed since last backup. We need to use 'tar cf' because
+# we want to benefit from tar's ability to exclude files from another file.
+# The changed files are listed on stdout, relative to /.
+# WARNING! because it uses tar, it does not detect removed files.
+list_changes() {
+  if [ -r "$FILE" ]; then
+    flx check --ignore-dot --ignore-link --ignore-date file:$FILE fs:/etc \
+      | awk '/^[+>]/ { print $9 }' \
+      | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+  else
+      tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
+  fi
+}
+
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
@@ -82,12 +96,13 @@ fi
 
 if [ $VERBOSE -eq 1 ]; then
   echo "List of files modified since last backup."
-  flx check --ignore-dot fs:/etc file:$FILE | grep -vwF "${FILE#/}"
+  rm -f /etc/blkid.tab{,.old} 2>/dev/null
+  flx check --ignore-dot file:$FILE fs:/etc | grep -vwF "${FILE#/}"
   exit 0
 fi
 
 if [ $FORCE -eq 0 -a -e $FILE ] && \
-   [ $(flx check --ignore-dot fs:/etc file:$FILE | grep -cvwF "${FILE#/}") -gt 0 ]; then
+   [ $(list_changes | wc -l) -gt 0 ]; then
   echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
   exit 1;
 fi 
