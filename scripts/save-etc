@@ -19,6 +19,7 @@ STDOUT=0
 QUIET=0
 LIST=0
 TOFILE=0
+TONET=0
 
 # Mounts the flash reaw/write in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -71,6 +72,21 @@ archive_etc() {
     | gzip -c9
 }
 
+# creates a secure empty temporary directory and returns its full path name.
+# Returns 0 if it succeeds, with the name on stdout, otherwise returns 1.
+mkstemp() {
+  local name attempts=10
+  while [ $attempts -gt 0 ]; do
+    name="${TMPDIR-/tmp}/$$.$RANDOM.$attempts"
+    if mkdir -m 0700 $name >/dev/null 2>/dev/null; then
+      echo "$name"
+      return 0
+    fi
+    rmdir $name >/dev/null 2>/dev/null
+    ((attempts--))
+  done
+  return 1
+}
 
 # Checks what has changed since last backup. We need to use 'tar cf' because
 # we want to benefit from tar's ability to exclude files from another file.
@@ -84,6 +100,14 @@ list_changes() {
   else
       tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
   fi
+}
+
+# kills the program and outputs an error if provided.
+function die {
+    local ret="$1"
+    shift
+    [ -n "$*" ] && echo "$@" >&2
+    exit $ret
 }
 
 #  
@@ -101,6 +125,10 @@ while [ $# -gt 0 ]; do
     OUTFILE="$2"
     [ -n "${OUTFILE##/*}" ] && OUTFILE="$OLDDIR/$OUTFILE"
     shift
+  elif [ ".$1" = ".-p" -a -n "$2" ]; then
+    TONET=1
+    OUTURL="$2"
+    shift
   else
     echo "Unknown argument: $1"
     echo "Valid options are :"
@@ -110,6 +138,7 @@ while [ $# -gt 0 ]; do
     echo "  -q : suppress any message. With -v, return non-0 if unsaved changes exist ;"
     echo "  -s : dump archive to stdout instead of flash."
     echo "  -o <file> : dump archive to file instead of flash."
+    echo "  -p tftp://server[:port][/file] : send archive to tftp server instead."
     exit 1
   fi
   shift
@@ -143,13 +172,13 @@ if [ $VERBOSE -eq 1 ]; then
   fi
 fi
 
-if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a $TOFILE -eq 0 -a -e $FILE ] && \
+if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a $TOFILE -eq 0 -a $TONET -eq 0 -a -e $FILE ] && \
   [ $(list_changes | wc -l) -eq 0 ]; then
   [ $QUIET -eq 0 ] && echo "Nothing changed since last backup. Use '-f' if you want to force."
   exit 1;
 fi 
 
-if [ $STDOUT -eq 0 -a $TOFILE -eq 0 ]; then
+if [ $STDOUT -eq 0 -a $TOFILE -eq 0 -a $TONET -eq 0 ]; then
   mount_flash_rw || exit 1
 
   rm -f $FLASHCFG/config.new
@@ -157,6 +186,40 @@ if [ $STDOUT -eq 0 -a $TOFILE -eq 0 ]; then
   archive_etc >$FLASHCFG/config.new
 elif [ $TOFILE -eq 1 ]; then
   archive_etc > "$OUTFILE"
+  exit 0
+elif [ $TONET -eq 1 ]; then
+  unset proto server defp port file
+  unset temp_cfg_dir
+
+  file="$OUTURL"
+  [ -z "${file##*://*}" ] && proto="${file%%://*}"
+  file="${file#*://}" ; proto="${proto:-tftp}"
+
+  case "$proto" in
+    tftp) defp=69 ;;
+    *) die 1 "Unsupported protocol for put operation : $proto" ;;
+  esac
+
+  [ -z "${file##*/*}" ] || file="${file}/"
+  server="${file%%/*}"
+  if [ -n "$server" ]; then
+    file="/${file#*/}"
+  fi
+  [ -z "${server##*:*}" ] && port="${server#*:}"
+  server="${server%%:*}" ; port="${port:-$defp}"
+
+  [ -n "${server}" ] || die 1 "Invalid network path specification: $OUTURL"
+  if [ -z "${file%%*/}" ]; then
+    file="${file}$(uname -n)-$(date +%Y%m%d-%H%M).bin"
+    echo "Using $file as the remote file name."
+  fi
+
+  temp_cfg_dir="$(mkstemp)" || die 1 "Cannot create a temporary directory in '${TMPDIR-/tmp}'."
+  OUTFILE="$temp_cfg_dir/tonet"
+  archive_etc > "$OUTFILE"
+  tftp "$server" "$port" -c put "$OUTFILE" "${file#/}"
+  echo "Done."
+  rm -rf "$temp_cfg_dir"
   exit 0
 else
   archive_etc
