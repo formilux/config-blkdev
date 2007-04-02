@@ -4,6 +4,7 @@
 # it will be able to check whether files have changed next time.
 
 # get out of /flash and /etc just in case.
+OLDDIR="$PWD"
 cd /
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -17,6 +18,7 @@ VERBOSE=0
 STDOUT=0
 QUIET=0
 LIST=0
+TOFILE=0
 
 # Mounts the flash reaw/write in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -94,6 +96,11 @@ while [ $# -gt 0 ]; do
   elif [ ".$1" = ".-q" ]; then QUIET=1
   elif [ ".$1" = ".-s" ]; then STDOUT=1
   elif [ ".$1" = ".-l" ]; then LIST=1
+  elif [ ".$1" = ".-o" -a -n "$2" ]; then
+    TOFILE=1
+    OUTFILE="$2"
+    [ -n "${OUTFILE##/*}" ] && OUTFILE="$OLDDIR/$OUTFILE"
+    shift
   else
     echo "Unknown argument: $1"
     echo "Valid options are :"
@@ -102,6 +109,7 @@ while [ $# -gt 0 ]; do
     echo "  -l : (with -v) use listing output format (no headers) ;"
     echo "  -q : suppress any message. With -v, return non-0 if unsaved changes exist ;"
     echo "  -s : dump archive to stdout instead of flash."
+    echo "  -o <file> : dump archive to file instead of flash."
     exit 1
   fi
   shift
@@ -135,18 +143,21 @@ if [ $VERBOSE -eq 1 ]; then
   fi
 fi
 
-if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a -e $FILE ] && \
+if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a $TOFILE -eq 0 -a -e $FILE ] && \
   [ $(list_changes | wc -l) -eq 0 ]; then
   [ $QUIET -eq 0 ] && echo "Nothing changed since last backup. Use '-f' if you want to force."
   exit 1;
 fi 
 
-if [ $STDOUT -eq 0 ]; then
+if [ $STDOUT -eq 0 -a $TOFILE -eq 0 ]; then
   mount_flash_rw || exit 1
 
   rm -f $FLASHCFG/config.new
   touch $FLASHCFG/config.new ; chmod 600 $FLASHCFG/config.new
   archive_etc >$FLASHCFG/config.new
+elif [ $TOFILE -eq 1 ]; then
+  archive_etc > "$OUTFILE"
+  exit 0
 else
   archive_etc
   exit 0
