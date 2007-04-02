@@ -7,6 +7,7 @@
 # if a previous config had already been loaded.
 
 # get out of /flash and /etc just in case.
+OLDDIR="$PWD"
 cd /
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -59,6 +60,22 @@ umount_flash() {
   return 0
 }
 
+# creates a secure empty temporary directory and returns its full path name.
+# Returns 0 if it succeeds, with the name on stdout, otherwise returns 1.
+mkstemp() {
+  local name attempts=10
+  while [ $attempts -gt 0 ]; do
+    name="${TMPDIR-/tmp}/$$.$RANDOM.$attempts"
+    if mkdir -m 0700 $name >/dev/null 2>/dev/null; then
+      echo "$name"
+      return 0
+    fi
+    rmdir $name >/dev/null 2>/dev/null
+    ((attempts--))
+  done
+  return 1
+}
+
 # Checks what has changed since last backup. We need to use 'tar cf' because
 # we want to benefit from tar's ability to exclude files from another file.
 # The changed files are listed on stdout, relative to /.
@@ -73,15 +90,23 @@ list_changes() {
   fi
 }
 
+# kills the program and outputs an error if provided.
+function die {
+    local ret="$1"
+    shift
+    [ -n "$*" ] && echo "$@" >&2
+    exit $ret
+}
+
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
-  elif [ -z "${1##-*}" ]; then
+  elif [ "${1}" != "-" -a -z "${1##-*}" ]; then
     echo "Unknown argument: $1"
     echo "Valid options are :"
     echo "  -f : force update and ignore local changes ;"
     echo "  -v : only check whether files have been modified ;"
-    echo "  <file> : restore from this file instead of flash."
+    echo "  <file> : restore from this file instead of flash. Use '-' for stdin."
     exit 1
   else
     break
@@ -91,6 +116,7 @@ done
 
 if [ $# -gt 0 ]; then
   CFGFILE="$1"
+  [ -n "${CFGFILE##/*}" -a "${CFGFILE}" != "-" ] && CFGFILE="$OLDDIR/$CFGFILE"
   shift
 fi
 
@@ -109,6 +135,15 @@ fi
 
 # restore from local file ?
 if [ -n "$CFGFILE" ]; then
+  unset temp_cfg_dir
+  if [ "$CFGFILE" = "-" ]; then
+    # restore from stdin
+    temp_cfg_dir="$(mkstemp)" || die 1 "Cannot create a temporary directory in '${TMPDIR-/tmp}'."
+    cat > "$temp_cfg_dir/stdin"
+    if [ -s "$temp_cfg_dir/stdin" ] && [ $(tar ztf "$temp_cfg_dir/stdin" 2>/dev/null|wc -l) -gt 0 ]; then
+	CFGFILE="$temp_cfg_dir/stdin"
+    fi
+  fi
   if [ -s "$CFGFILE" ] && [ $(tar ztf "$CFGFILE" 2>/dev/null|wc -l) -gt 0 ]; then
     if [ -e /etc/config.rc ]; then
       while umount /etc >/dev/null 2>&1; do : ; done
@@ -126,10 +161,12 @@ if [ -n "$CFGFILE" ]; then
         rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
         flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
       echo "$CFGFILE"
+      [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
       exit 0
     fi
     while umount /etc >/dev/null 2>&1; do : ; done
   fi
+  [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
 fi
 
 # if we get any error there, we try to restore the flash configuration.
