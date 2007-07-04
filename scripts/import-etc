@@ -1,0 +1,122 @@
+#!/bin/sh
+#
+# import-etc : imports a saved formilux configuration
+# Returns 0 on success, non-zero on failure.
+#
+# Author: Emeric BRUN <emeric@exceliance.fr>
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+FLASHDIR=/flash
+FLASHCFG=$FLASHDIR/cfg
+FILE=/etc/.restored
+EXCLUDE=/usr/share/factory/ignore-files
+REFERENCE=/usr/share/factory/base-etc
+FORCE=0
+VERBOSE=0
+STDOUT=0
+QUIET=0
+LIST=0
+
+# Mounts the flash reaw/write in $FLASHDIR.
+# This checks /proc/cmdline for the LAST 'flash=' statement, and
+# uses its value as a /dev entry to mount it read-only into $FLASHDIR.
+# Returns 0 if OK, 1 otherwise.
+# DOES NOT unmounts $FLASHDIR first if previously mounted, but returns with
+# an error indicating a resource access conflict.
+mount_flash_rw() {
+  local flash
+  flash="$(cat /proc/cmdline)"
+  if [ -n "${flash##*flash=*}" ]; then
+    [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
+    return 1
+  fi
+  flash=${flash##*flash=}
+  flash=${flash%% *}
+  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
+  if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
+    rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+    [ $QUIET -eq 0 ] && echo "Error: mount failed."
+    return 1
+  fi
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  return 0
+}
+
+# unmounts /flash
+umount_flash() {
+  if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+    cd /
+    if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+      [ $QUIET -eq 0 ] && echo "Error: cannot unmount $FLASHDIR"
+      return 1
+    else
+      [ $QUIET -eq 0 ] && echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+    fi
+  fi
+  return 0
+}
+
+print_usage() {
+	echo "Usage :"
+	echo "  $0 [-h] <imagefile> or - for stdin"
+	echo "    -h : show this help"
+	echo ""
+	echo "Return codes :"
+	echo "  0 : success"
+	echo "  1 : error"
+}
+
+#  
+# main
+#
+
+if [ "$1" = "-h" ] ; then
+	print_usage
+	exit 0
+fi
+
+import_file=$1
+
+if [ "$import_file" != "-" ] ; then
+	if [  ! -e "$import_file" ] ; then
+		echo "unable to open image file \"$import_file\"." >&2
+		exit 1
+	fi
+fi
+
+mount_flash_rw || exit 1
+
+rm -f $FLASHCFG/config.new 2>/dev/null
+touch $FLASHCFG/config.new ; chmod 600 $FLASHCFG/config.new
+if [ "$import_file" = "-" ] ; then
+	cat > $FLASHCFG/config.new
+else
+	cat "$import_file" > $FLASHCFG/config.new
+fi
+
+test=$( tar -tzf "$FLASHCFG/config.new" "etc/config.rc" 2>/dev/null ) 
+if [ "$test" != "etc/config.rc" ] ; then
+        echo "invalid image file." >&2
+	rm -f $FLASHCFG/config.new 2>/dev/null
+	cd /
+	umount_flash
+        exit 1
+fi
+
+
+if [ -e "$FLASHCFG/config.cur" ] ; then
+        mv -f $FLASHCFG/config.cur $FLASHCFG/config.bak
+fi
+
+mv  $FLASHCFG/config.new  $FLASHCFG/config.cur
+cp $FLASHCFG/config.cur $FLASHCFG/config.adm
+
+cd /
+umount_flash
+
+echo "configuration import successful."
+
+exit 0
+
