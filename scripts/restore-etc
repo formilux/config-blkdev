@@ -20,7 +20,6 @@ FORCE=0
 VERBOSE=0
 CFGFILE=
 MOUNTOPT="size=2m"
-TAROPT=""
 
 # Mounts the flash in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -154,8 +153,12 @@ if [ -n "$CFGFILE" ]; then
       mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
         mount -n -t ramfs /etc /etc
     fi
-    (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc $TAROPT -xf -) >/dev/null 2>&1
-    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 $TAROPT -zxf "$CFGFILE" >/dev/null 2>&1
+    (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+    # first, we want to remove all directories from /etc which are replaced
+    # by something not a directory in the archive (typically a symlink). Directories
+    # in the file must not be removed since they may carry only few files.
+    tar ztf "$CFGFILE" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
+    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$CFGFILE" >/dev/null 2>&1
     # ignore the return code, because some files may come with extra CR/LF.
     if [ -s /etc/config.rc ]; then
       ( rm -f /etc/blkid.tab{,.old}; \
@@ -182,8 +185,12 @@ if mount_flash_ro; then
         mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
           mount -n -t ramfs /etc /etc
       fi
-      (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc $TAROPT -xf -) >/dev/null 2>&1
-      tar -C /etc --exclude-from $EXCLUDE --strip-components=1 $TAROPT -zxf $config >/dev/null 2>&1
+      (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+      # first, we want to remove all directories from /etc which are replaced
+      # by something not a directory in the archive (typically a symlink). Directories
+      # in the file must not be removed since they may carry only few files.
+      tar ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
+      tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
       if [ $? -eq 0 -a -s /etc/config.rc ]; then
         umount_flash
         ( rm -f /etc/blkid.tab{,.old}; \
@@ -208,7 +215,7 @@ if [ ! -e /etc/config.rc ]; then
   mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
     mount -n -t ramfs /etc /etc 2>/dev/null || exit 1  # already mounted
 fi
-(tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc $TAROPT -xf -) >/dev/null 2>&1
+(tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
 ( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
 rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
