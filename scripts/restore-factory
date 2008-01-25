@@ -1,0 +1,137 @@
+#!/bin/sh
+
+cd /
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+FLASHDIR=/flash
+FLASHCFG=$FLASHDIR/cfg
+FILE=/etc/.restored
+EXCLUDE=/usr/share/factory/ignore-files
+REFERENCE=/usr/share/factory/base-etc
+FORCE=0
+VERBOSE=0
+STDOUT=0
+QUIET=0
+LIST=0
+LOCKFILE="/tmp/lock-save-dyn"
+
+# Mounts the flash reaw/write in $FLASHDIR.
+# This checks /proc/cmdline for the LAST 'flash=' statement, and
+# uses its value as a /dev entry to mount it read-only into $FLASHDIR.
+# Returns 0 if OK, 1 otherwise.
+# DOES NOT unmounts $FLASHDIR first if previously mounted, but returns with
+# an error indicating a resource access conflict.
+mount_flash_rw() {
+  local flash
+  flash="$(cat /proc/cmdline)"
+  if [ -n "${flash##*flash=*}" ]; then
+    [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
+    return 1
+  fi
+  flash=${flash##*flash=}
+  flash=${flash%% *}
+  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
+  if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
+    rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+    [ $QUIET -eq 0 ] && echo "Error: mount failed."
+    return 1
+  fi
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  return 0
+}
+
+# unmounts /flash
+umount_flash() {
+  if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+    cd /
+    if ! umount -d $FLASHDIR >/dev/null 2>&1; then
+      [ $QUIET -eq 0 ] && echo "Error: cannot unmount $FLASHDIR"
+      return 1
+    else
+      [ $QUIET -eq 0 ] && echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+    fi
+  fi
+  return 0
+}
+
+function lock_save_dyn {
+  local now
+  local lockdate
+  local delay
+
+  if [ -e $LOCKFILE ] ; then
+     now=$(date -u "+%s")
+     lockdate=$(date -u -r $LOCKFILE "+%s")
+
+     let delay=$now-$lockdate
+     [ $delay -lt $MAXLOCKDELAY ] && return 1
+  fi
+  touch $LOCKFILE
+  return 0
+}
+
+function unlock_save_dyn {
+  rm -f $LOCKFILE
+  return 0
+}
+
+print_usage() {
+        echo "Usage :"
+        echo "  $0 [-h]"
+        echo "    -h : show this help"
+        echo ""
+        echo "Return codes :"
+        echo "  0 : success"
+        echo "  1 : error"
+}
+
+#  
+# main
+#
+
+if [ "$1" = "-h" ] ; then 
+	print_usage
+	exit 0
+fi
+
+if [ "$1" != "-f" ] ; then
+	echo "Are you sure to restore factory defaults? all settings will be lost !"
+	echo "(No/Yes)"
+	read resp
+	if [ "$resp" != "Yes" ] ; then
+		exit 1 
+	fi
+fi
+
+mount_flash_rw || exit 1
+
+if [ -e $FLASHCFG/config.cur ] ; then
+	rm -f $FLASHCFG/config.cur
+fi
+
+if [ -e $FLASHCFG/config.bak ] ; then
+	rm -f $FLASHCFG/config.bak
+fi
+
+if [ -e $FLASHCFG/config.val ] ; then
+        rm -f $FLASHCFG/config.val
+fi
+
+if [ -e $FLASHCFG/config.adm ] ; then
+        rm -f $FLASHCFG/config.adm
+fi
+
+umount_flash
+
+if [ -d "/nv/dyn" ] ; then
+	lock_save_dyn
+	[ "$?" != "0" ] && exit 1
+        rm -rf "/nv/dyn"
+	unlock_save_dyn	
+fi
+
+echo "default factory configuration restored."
+exit 0
+
