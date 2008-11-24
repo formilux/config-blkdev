@@ -29,14 +29,35 @@ TONET=0
 # an error indicating a resource access conflict.
 mount_flash_rw() {
   local flash
-  flash="$(cat /proc/cmdline)"
-  if [ -n "${flash##*flash=*}" ]; then
-    [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
-    return 1
+
+
+  unset FLASH_MBR FLASH_HW FLASH_SW
+
+  if [ -s /var/state/flash-layout.rc ]; then
+    . /var/state/flash-layout.rc
   fi
-  flash=${flash##*flash=}
-  flash=${flash%% *}
-  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  if [ -z "$FLASH_SW" ]; then
+    if [ -x /sbin/mk-flash-layout ]; then
+      /sbin/mk-flash-layout
+      if [ -s /var/state/flash-layout.rc ]; then
+        . /var/state/flash-layout.rc
+      fi
+    fi
+  fi
+
+  if [ -z "$FLASH_SW" ]; then
+    flash="$(cat /proc/cmdline)"
+    if [ -n "${flash##*flash=*}" ]; then
+      [ $QUIET -eq 0 ] && echo "No flash device specified in /proc/cmdline."
+      return 1
+    fi
+    flash=${flash##*flash=}
+    flash=${flash%% *}
+    [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+  else
+    flash=$FLASH_SW
+  fi
 
   [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
   if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
