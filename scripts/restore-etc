@@ -59,6 +59,8 @@ mount_flash_ro() {
   fi
 
   echo "Mounting ${flash} on $FLASHDIR..."
+  cd /
+  umount -n -d $FLASHDIR >/dev/null 2>&1
   if ! mount -n -r $flash $FLASHDIR >/dev/null 2>&1; then
     echo "Error: mount failed."
     return 1
