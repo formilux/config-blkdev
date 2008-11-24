@@ -29,14 +29,34 @@ MOUNTOPT="size=2m"
 # an error indicating a resource access conflict.
 mount_flash_ro() {
   local flash
-  flash="$(cat /proc/cmdline)"
-  if [ -n "${flash##*flash=*}" ]; then
-    echo "No flash device specified in /proc/cmdline."
-    return 1
+
+  unset FLASH_MBR FLASH_HW FLASH_SW
+
+  if [ -s /var/state/flash-layout.rc ]; then
+    . /var/state/flash-layout.rc
   fi
-  flash=${flash##*flash=}
-  flash=${flash%% *}
-  [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+
+  if [ -z "$FLASH_SW" ]; then
+    if [ -x /sbin/mk-flash-layout ]; then
+      /sbin/mk-flash-layout -k && return 0
+      if [ -s /var/state/flash-layout.rc ]; then
+        . /var/state/flash-layout.rc
+      fi
+    fi
+  fi
+
+  if [ -z "$FLASH_SW" ]; then
+    flash="$(cat /proc/cmdline)"
+    if [ -n "${flash##*flash=*}" ]; then
+      echo "No flash device specified in /proc/cmdline."
+      return 1
+    fi
+    flash=${flash##*flash=}
+    flash=${flash%% *}
+    [ -n "${flash##/dev/*}" ] && flash="/dev/$flash"
+  else
+    flash=$FLASH_SW
+  fi
 
   echo "Mounting ${flash} on $FLASHDIR..."
   if ! mount -n -r $flash $FLASHDIR >/dev/null 2>&1; then
