@@ -53,7 +53,7 @@ mount_flash_rw() {
   fi
 
   [ $QUIET -eq 0 ] && echo "Mounting ${flash} on $FLASHDIR..."
-  if ! mount -w $flash $FLASHDIR >/dev/null 2>&1; then
+  if ! mount -n -w $flash $FLASHDIR >/dev/null 2>&1; then
     rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
     [ $QUIET -eq 0 ] && echo "Error: mount failed."
     return 1
