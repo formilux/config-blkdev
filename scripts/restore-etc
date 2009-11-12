@@ -82,6 +82,15 @@ umount_flash() {
   return 0
 }
 
+# copies /flash/fstab to /etc if /etc/fstab is missing
+copy_fstab_from_flash() {
+  if [ ! -s /etc/fstab -a -s $FLASHDIR/fstab ]; then
+    # missing fstab and we have one lying in /flash. This is the one we want to use.
+    echo "Note: using original fstab until configuration is saved."
+    cp $FLASHDIR/fstab /etc/fstab && chown root:adm /etc/fstab && chmod 640 /etc/fstab
+  fi
+}
+
 # creates a secure empty temporary directory and returns its full path name.
 # Returns 0 if it succeeds, with the name on stdout, otherwise returns 1.
 mkstemp() {
@@ -195,6 +204,8 @@ if [ -n "$CFGFILE" ]; then
   [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
 fi
 
+must_unmount=0
+
 # if we get any error there, we try to restore the flash configuration.
 if mount_flash_ro; then
   for config in $FLASHCFG/config.cur $FLASHCFG/config.bak $FLASHCFG/config.fac
@@ -214,6 +225,7 @@ if mount_flash_ro; then
       tar ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
       tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
       if [ $? -eq 0 -a -s /etc/config.rc ]; then
+        copy_fstab_from_flash
         umount_flash
         ( rm -f /etc/blkid.tab{,.old}; \
           rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
@@ -224,7 +236,7 @@ if mount_flash_ro; then
       while umount /etc >/dev/null 2>&1; do : ; done
     fi
   done
-  umount_flash
+  must_unmount=1
   rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
 fi
 
@@ -239,6 +251,9 @@ if [ ! -e /etc/config.rc ]; then
 fi
 (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
+( copy_fstab_from_flash ) >/dev/null 2>&1
+[ $must_unmount -eq 0 ] || umount_flash
+
 ( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
 rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
 exit 1
