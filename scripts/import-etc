@@ -122,6 +122,7 @@ if [ "$test" != "etc/config.rc" ] ; then
 	rm -f $FLASHCFG/config.new 2>/dev/null
 	cd /
 	umount_flash
+	sync
         exit 1
 fi
 
@@ -135,6 +136,7 @@ cp $FLASHCFG/config.cur $FLASHCFG/config.adm
 
 cd /
 umount_flash
+sync
 
 echo "configuration import successful."
 

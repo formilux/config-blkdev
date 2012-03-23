@@ -251,6 +251,7 @@ if [ ! -s $FLASHCFG/config.new ]; then
   rm -f $FLASHCFG/config.new
   umount_flash
   [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
+  sync
   exit 1
 fi
 
@@ -260,9 +261,11 @@ if ! mv $FLASHCFG/config.{new,cur} 2>/dev/null; then
   rm -f $FLASHCFG/config.new
   umount_flash
   [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
+  sync
   exit 1
 fi
 umount_flash
+sync
 
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
 ( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) 2>/dev/null

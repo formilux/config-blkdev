@@ -88,5 +88,6 @@ else
 fi
 
 umount_flash
+sync
 
 exit 0

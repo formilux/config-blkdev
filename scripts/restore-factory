@@ -144,6 +144,7 @@ if [ -e $FLASHCFG/config.adm ] ; then
 fi
 
 umount_flash
+sync
 
 if [ -d "/nv/dyn" ] ; then
 	lock_save_dyn

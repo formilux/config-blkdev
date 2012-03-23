@@ -108,5 +108,6 @@ if [ ! -e "$FLASHCFG/booterr.log" ] ; then
 fi
 
 umount_flash
+sync
 
 exit 0
