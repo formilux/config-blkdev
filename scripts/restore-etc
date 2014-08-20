@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script unmounts /etc, mounts a ramfs onto it, and extracts
+# This script unmounts /etc, mounts a ramfs/tmpfs onto it, and extracts
 # /flash/cfg/config.{cur,bak,fac} into it. If an argument is passed, it will be
 # used as a local config file and the restoration will proceed from this file.
 # Note: this script checks the existence of /etc/config.rc in order to detect
@@ -20,6 +20,7 @@ FORCE=0
 VERBOSE=0
 CFGFILE=
 MOUNTOPT="size=2m"
+FSTYPE=tmpfs
 
 # Mounts the flash in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -129,6 +130,10 @@ function die {
     exit $ret
 }
 
+if ! grep -wq tmpfs /proc/filesystems 2>/dev/null; then
+  FSTYPE=ramfs
+fi
+
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
@@ -181,8 +186,8 @@ if [ -n "$CFGFILE" ]; then
     fi
 
     if [ ! -e /etc/config.rc ]; then
-      mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-        mount -n -t ramfs /etc /etc
+      mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+        mount -n -t $FSTYPE /etc /etc
     fi
     (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
     # first, we want to remove all directories from /etc which are replaced
@@ -215,8 +220,8 @@ if mount_flash_ro; then
         while umount /etc >/dev/null 2>&1; do : ; done
       fi
       if [ ! -e /etc/config.rc ]; then
-        mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-          mount -n -t ramfs /etc /etc
+        mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+          mount -n -t $FSTYPE /etc /etc
       fi
       (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
       # first, we want to remove all directories from /etc which are replaced
@@ -241,13 +246,13 @@ if mount_flash_ro; then
 fi
 
 # We have not found any config, so we'll build /etc from the reference etc
-# directory into a ramfs anyway so that we get a read/write /etc.
+# directory into a ramfs/tmpfs anyway so that we get a read/write /etc.
 if [ -e /etc/config.rc ]; then
   while umount /etc >/dev/null 2>&1; do : ; done
 fi
 if [ ! -e /etc/config.rc ]; then
-  mount -n -t ramfs ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-    mount -n -t ramfs /etc /etc 2>/dev/null || exit 1  # already mounted
+  mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+    mount -n -t $FSTYPE /etc /etc 2>/dev/null || exit 1  # already mounted
 fi
 (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
 ( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
