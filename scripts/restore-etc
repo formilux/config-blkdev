@@ -137,11 +137,13 @@ fi
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
+  elif [ ".$1" = ".-t" ]; then FSTYPE="$2"; shift
   elif [ "${1}" != "-" -a -z "${1##-*}" ]; then
     echo "Unknown argument: $1"
     echo "Valid options are :"
     echo "  -f : force update and ignore local changes ;"
     echo "  -v : only check whether files have been modified ;"
+    echo "  -t <fstype> : force to use a filesystem of this type ;"
     echo "  <file> : restore from this file instead of flash. Use '-' for stdin."
     exit 1
   else
