@@ -197,7 +197,7 @@ if [ -n "$CFGFILE" ]; then
     # first, we want to remove all directories from /etc which are replaced
     # by something not a directory in the archive (typically a symlink). Directories
     # in the file must not be removed since they may carry only few files.
-    tar ztf "$CFGFILE" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
+    tar --exclude-from $EXCLUDE -ztf "$CFGFILE" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
     tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$CFGFILE" >/dev/null 2>&1
     # ignore the return code, because some files may come with extra CR/LF.
     if [ -s /etc/config.rc ]; then
@@ -231,7 +231,7 @@ if mount_flash_ro; then
       # first, we want to remove all directories from /etc which are replaced
       # by something not a directory in the archive (typically a symlink). Directories
       # in the file must not be removed since they may carry only few files.
-      tar ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
+      tar --exclude-from $EXCLUDE -ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
       tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
       if [ $? -eq 0 -a -s /etc/config.rc ]; then
         copy_fstab_from_flash
