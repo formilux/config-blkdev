@@ -14,6 +14,7 @@ STDOUT=0
 QUIET=0
 LIST=0
 LOCKFILE="/tmp/lock-save-dyn"
+PROG="${0##*/}"
 
 # Mounts the flash reaw/write in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -76,6 +77,28 @@ umount_flash() {
   return 0
 }
 
+# Usage: $0 <message>|<status>
+write_journal()
+{
+  local date product model version tty
+  local message="$1"
+
+  date=$(date +"%Y/%m/%d %H:%M:%S")
+  if /bin/tty -s; then
+    tty=$(/bin/tty 2>/dev/null)
+    tty=${tty#/dev/}
+  else
+    tty="none"
+  fi
+
+  set -- $(grep "^Product:" /usr/share/factory/version); product="$2"
+  set -- $(grep "^Model:" /usr/share/factory/version); model="$2"
+  set -- $(grep "^Version:" /usr/share/factory/version); version="$2"
+
+  echo "$date $product $model $version $tty $PROG: $message" >> "$FLASHDIR/.journal" 2>/dev/null
+  chattr +a "$FLASHDIR/.journal" >/dev/null 2>&1
+}
+
 function lock_save_dyn {
   local now
   local lockdate
@@ -129,21 +152,23 @@ fi
 
 mount_flash_rw || exit 1
 
-if [ -e $FLASHCFG/config.cur ] ; then
-	rm -f $FLASHCFG/config.cur
+if [ "$1" != "-f" ]; then
+	write_journal "operation requested in interactive mode"
+else
+	set -- $(grep "^PPid:" /proc/$$/status 2>/dev/null); ppid="$2"
+	set -- $(grep "^Name:" /proc/$ppid/status 2>/dev/null); name="$2"
+	write_journal "called with -f from process $name"
 fi
 
-if [ -e $FLASHCFG/config.bak ] ; then
-	rm -f $FLASHCFG/config.bak
-fi
+for file in config.cur config.bak config.val config.adm; do
+	if [ -e "$FLASHCFG/$file" ] ; then
+		msg=$(rm -f "$FLASHCFG/$file" 2>&1)
+		ret=$?
+		msg=$(echo -n "$msg" | tr '[\000- ]' ' ')
+		[ $ret = 0 ] || write_journal "rm $file failed: |$msg| status: $ret"
+	fi
+done
 
-if [ -e $FLASHCFG/config.val ] ; then
-        rm -f $FLASHCFG/config.val
-fi
-
-if [ -e $FLASHCFG/config.adm ] ; then
-        rm -f $FLASHCFG/config.adm
-fi
 
 umount_flash
 sync
