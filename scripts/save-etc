@@ -20,6 +20,7 @@ QUIET=0
 LIST=0
 TOFILE=0
 TONET=0
+PROG="${0##*/}"
 
 # Mounts the flash reaw/write in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -81,6 +82,29 @@ umount_flash() {
     fi
   fi
   return 0
+}
+
+# Usage: $0 <step> <message>|<status>
+write_journal()
+{
+  local date product model version tty
+  local step="$1"
+  local message="$2"
+
+  date=$(date +"%Y/%m/%d %H:%M:%S")
+  if /bin/tty -s; then
+    tty=$(/bin/tty 2>/dev/null)
+    tty=${tty#/dev/}
+  else
+    tty="none"
+  fi
+
+  set -- $(grep "^Product:" /usr/share/factory/version); product="$2"
+  set -- $(grep "^Model:" /usr/share/factory/version); model="$2"
+  set -- $(grep "^Version:" /usr/share/factory/version); version="$2"
+
+  echo "$date $product $model $version $tty $PROG: $step: $message" >> "$FLASHDIR/.journal" 2>/dev/null
+  chattr +a "$FLASHDIR/.journal" >/dev/null 2>&1
 }
 
 # makes an archive from files in /etc which differ from the factory config,
@@ -202,9 +226,26 @@ fi
 if [ $STDOUT -eq 0 -a $TOFILE -eq 0 -a $TONET -eq 0 ]; then
   mount_flash_rw || exit 1
 
-  rm -f $FLASHCFG/config.new
-  touch $FLASHCFG/config.new ; chmod 600 $FLASHCFG/config.new
-  archive_etc >$FLASHCFG/config.new
+  msg=$(rm -f $FLASHCFG/config.new 2>&1)
+  ret=$?
+  msg=$(echo -n $msg | tr '[\000- ]' ' ')
+  [ $ret = 0 ] || write_journal "1/rm" "|$msg| status: $ret"
+  msg=$(touch $FLASHCFG/config.new 2>&1)
+  ret=$?
+  msg=$(echo -n $msg | tr '[\000- ]' ' ')
+  [ $ret = 0 ] || write_journal "2/touch" "|$msg| status: $ret"
+  msg=$(chmod 600 $FLASHCFG/config.new 2>&1)
+  ret=$?
+  msg=$(echo -n $msg | tr '[\000- ]' ' ')
+  [ $ret = 0 ] || write_journal "3/chmod" "|$msg| status: $ret"
+
+  # below, we get in msg either an error message from stderr in case of error,
+  # or the file status in case of success.
+  msg=$(archive_etc 2>&1 >$FLASHCFG/config.new)
+  ret="$?"
+  [ $ret = 0 ] && msg=$(find "$FLASHCFG/config.new" -printf "%f|%s|%T+" 2>&1)
+  msg=$(echo -n $msg | tr '[\000- ]' ' ')
+  write_journal "archive" "|$msg| status: $ret"
 elif [ $TOFILE -eq 1 ]; then
   archive_etc > "$OUTFILE"
   exit 0
@@ -249,16 +290,28 @@ fi
 
 if [ ! -s $FLASHCFG/config.new ]; then
   rm -f $FLASHCFG/config.new
+  write_journal "cancel" "4/rm empty config.new: status: $?"
   umount_flash
   [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
   sync
   exit 1
 fi
 
-mv $FLASHCFG/config.{cur,bak} 2>/dev/null
-cp $FLASHCFG/config.{new,adm} 2>/dev/null
-if ! mv $FLASHCFG/config.{new,cur} 2>/dev/null; then
+msg=$(mv $FLASHCFG/config.{cur,bak} 2>&1)
+ret=$?
+msg=$(echo -n $msg | tr '[\000- ]' ' ')
+[ $ret = 0 ] || write_journal "5/mv" "config.cur->config.bak: |$msg| status: $ret"
+msg=$(cp $FLASHCFG/config.{new,adm} 2>&1)
+ret=$?
+msg=$(echo -n $msg | tr '[\000- ]' ' ')
+[ $ret = 0 ] || write_journal "6/cp" "config.new->config.adm: |$msg| status: $ret"
+msg=$(mv $FLASHCFG/config.{new,cur} 2>&1)
+ret=$?
+if [ $ret -ne 0 ]; then
+  msg=$(echo -n $msg | tr '[\000- ]' ' ')
+  write_journal "7/mv" "config.new->config.cur: |$msg| status: $ret"
   rm -f $FLASHCFG/config.new
+  write_journal "8/rm" "rm config.new: status: $?"
   umount_flash
   [ $QUIET -eq 0 ] && echo "Problem saving config to flash."
   sync
