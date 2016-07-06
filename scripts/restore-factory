@@ -99,8 +99,9 @@ function unlock_save_dyn {
 
 print_usage() {
         echo "Usage :"
-        echo "  $0 [-h]"
+        echo "  $0 [-h] [-f]"
         echo "    -h : show this help"
+        echo "    -f : force restore, disable any question"
         echo ""
         echo "Return codes :"
         echo "  0 : success"
