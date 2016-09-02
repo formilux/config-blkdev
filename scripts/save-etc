@@ -226,6 +226,7 @@ fi
 if [ $STDOUT -eq 0 -a $TOFILE -eq 0 -a $TONET -eq 0 ]; then
   mount_flash_rw || exit 1
 
+  rm -f $FLASHCFG/config.adm 2>/dev/null
   msg=$(rm -f $FLASHCFG/config.new 2>&1)
   ret=$?
   msg=$(echo -n $msg | tr '[\000- ]' ' ')
@@ -301,10 +302,6 @@ msg=$(mv $FLASHCFG/config.{cur,bak} 2>&1)
 ret=$?
 msg=$(echo -n $msg | tr '[\000- ]' ' ')
 [ $ret = 0 ] || write_journal "5/mv" "config.cur->config.bak: |$msg| status: $ret"
-msg=$(cp $FLASHCFG/config.{new,adm} 2>&1)
-ret=$?
-msg=$(echo -n $msg | tr '[\000- ]' ' ')
-[ $ret = 0 ] || write_journal "6/cp" "config.new->config.adm: |$msg| status: $ret"
 msg=$(mv $FLASHCFG/config.{new,cur} 2>&1)
 ret=$?
 if [ $ret -ne 0 ]; then

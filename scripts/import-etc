@@ -108,6 +108,7 @@ fi
 
 mount_flash_rw || exit 1
 
+rm -f $FLASHCFG/config.adm 2>/dev/null
 rm -f $FLASHCFG/config.new 2>/dev/null
 touch $FLASHCFG/config.new ; chmod 600 $FLASHCFG/config.new
 if [ "$import_file" = "-" ] ; then
@@ -132,7 +133,6 @@ if [ -e "$FLASHCFG/config.cur" ] ; then
 fi
 
 mv  $FLASHCFG/config.new  $FLASHCFG/config.cur
-cp $FLASHCFG/config.cur $FLASHCFG/config.adm
 
 cd /
 umount_flash
