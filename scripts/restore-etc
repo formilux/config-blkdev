@@ -51,7 +51,7 @@ mount_flash_ro() {
   if [ -z "$FLASH_SW" ]; then
     flash="$(cat /proc/cmdline)"
     if [ -n "${flash##*flash=*}" ]; then
-      echo "No flash device specified in /proc/cmdline."
+      echo "No flash device specified in /proc/cmdline." >&2
       return 1
     fi
     flash=${flash##*flash=}
@@ -61,11 +61,11 @@ mount_flash_ro() {
     flash=$FLASH_SW
   fi
 
-  echo "Mounting ${flash} on $FLASHDIR..."
+  echo "Mounting ${flash} on $FLASHDIR..." >&2
   cd /
   umount -n -d $FLASHDIR >/dev/null 2>&1
   if ! mount -n -r $flash $FLASHDIR >/dev/null 2>&1; then
-    echo "Error: mount failed."
+    echo "Error: mount failed." >&2
     return 1
   fi
   return 0
@@ -76,10 +76,10 @@ umount_flash() {
   if ! umount -d $FLASHDIR >/dev/null 2>&1; then
     cd /
     if ! umount -d $FLASHDIR >/dev/null 2>&1; then
-      echo "Error: cannot unmount $FLASHDIR"
+      echo "Error: cannot unmount $FLASHDIR" >&2
       return 1
     else
-      echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it."
+      echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it." >&2
     fi
   fi
   return 0
@@ -89,7 +89,7 @@ umount_flash() {
 copy_fstab_from_flash() {
   if [ ! -s "$ROOTDIR/etc/fstab" -a -s "$FLASHDIR/fstab" ]; then
     # missing fstab and we have one lying in /flash. This is the one we want to use.
-    echo "Note: using original fstab until configuration is saved."
+    echo "Note: using original fstab until configuration is saved." >&2
     cp $FLASHDIR/fstab "$ROOTDIR/etc/fstab" && chown root:adm "$ROOTDIR/etc/fstab" && chmod 640 "$ROOTDIR/etc/fstab"
   fi
 }
@@ -181,7 +181,7 @@ try_restore_config() {
     tar -C "$ROOTDIR/etc" --exclude-from $EXCLUDE --strip-components=1 -zxf "$config" >/dev/null 2>&1
     if [ $? -eq 0 -a -s "$ROOTDIR/etc/config.rc" ]; then
       update_signature_file
-      echo "$config"
+      echo "Loading $config" >&2
       [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
       return 0
     fi
