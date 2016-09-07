@@ -130,6 +130,68 @@ function die {
     exit $ret
 }
 
+# tries to unmount /etc
+unmount_etc() {
+  while umount /etc >/dev/null 2>&1; do : ; done
+}
+
+# mount /etc unless config.rc already exists
+mount_etc() {
+  if [ ! -e /etc/config.rc ]; then
+    mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
+      mount -n -t $FSTYPE /etc /etc
+  fi
+}
+
+# restore only the factory configuration over /etc
+reinstall_factory_etc() {
+  (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+}
+
+# rebuild the signature file after /etc has been restored
+update_signature_file() {
+  ( rm -f /etc/blkid.tab{,.old}; \
+    rm -f "$FILE" ; touch "$FILE" ; chmod 600 "$FILE"; \
+    flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >"$FILE" ) >/dev/null 2>&1
+}
+
+# try to restore file $1 to /etc. If "$1" is "-", stdin is used via a temporary
+# directory.
+try_restore_config() {
+  local temp_cfg_dir
+  local config="$1"
+
+  if [ "$config" = "-" ]; then
+    # restore from stdin
+    temp_cfg_dir="$(mkstemp)" || die 1 "Cannot create a temporary directory in '${TMPDIR-/tmp}'."
+    config="$temp_cfg_dir/stdin"
+    cat > "$temp_cfg_dir/stdin"
+  fi
+
+  if [ -s "$config" ] && [ $(tar ztf "$config" 2>/dev/null|wc -l) -gt 0 ]; then
+    unmount_etc
+    mount_etc
+    reinstall_factory_etc
+    # first, we want to remove all directories from /etc which are replaced
+    # by something not a directory in the archive (typically a symlink). Directories
+    # in the file must not be removed since they may carry only few files.
+    tar --exclude-from $EXCLUDE -ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
+    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$config" >/dev/null 2>&1
+    if [ $? -eq 0 -a -s /etc/config.rc ]; then
+      update_signature_file
+      echo "$config"
+      [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
+      return 0
+    fi
+    unmount_etc
+  fi
+  [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
+  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  return 1
+}
+
+#### main entry point
+
 if ! grep -wq tmpfs /proc/filesystems 2>/dev/null; then
   FSTYPE=ramfs
 fi
@@ -175,94 +237,31 @@ fi
 
 # restore from local file ?
 if [ -n "$CFGFILE" ]; then
-  unset temp_cfg_dir
-  if [ "$CFGFILE" = "-" ]; then
-    # restore from stdin
-    temp_cfg_dir="$(mkstemp)" || die 1 "Cannot create a temporary directory in '${TMPDIR-/tmp}'."
-    cat > "$temp_cfg_dir/stdin"
-    if [ -s "$temp_cfg_dir/stdin" ] && [ $(tar ztf "$temp_cfg_dir/stdin" 2>/dev/null|wc -l) -gt 0 ]; then
-	CFGFILE="$temp_cfg_dir/stdin"
-    fi
-  fi
-  if [ -s "$CFGFILE" ] && [ $(tar ztf "$CFGFILE" 2>/dev/null|wc -l) -gt 0 ]; then
-    if [ -e /etc/config.rc ]; then
-      while umount /etc >/dev/null 2>&1; do : ; done
-    fi
-
-    if [ ! -e /etc/config.rc ]; then
-      mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-        mount -n -t $FSTYPE /etc /etc
-    fi
-    (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
-    # first, we want to remove all directories from /etc which are replaced
-    # by something not a directory in the archive (typically a symlink). Directories
-    # in the file must not be removed since they may carry only few files.
-    tar --exclude-from $EXCLUDE -ztf "$CFGFILE" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
-    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$CFGFILE" >/dev/null 2>&1
-    # ignore the return code, because some files may come with extra CR/LF.
-    if [ -s /etc/config.rc ]; then
-      ( rm -f /etc/blkid.tab{,.old}; \
-        rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
-        flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
-      echo "$CFGFILE"
-      [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
-      exit 0
-    fi
-    while umount /etc >/dev/null 2>&1; do : ; done
-  fi
-  [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
+  try_restore_config "$CFGFILE"
+  exit $?
 fi
 
-must_unmount=0
-
 # if we get any error there, we try to restore the flash configuration.
+must_unmount=0
 if mount_flash_ro; then
+  must_unmount=1
   for config in $FLASHCFG/config.cur $FLASHCFG/config.bak $FLASHCFG/config.fac
   do
-    if [ -s $config ] && [ $(tar ztf $config 2>/dev/null|wc -l) -gt 0 ]; then
-      if [ -e /etc/config.rc ]; then
-        while umount /etc >/dev/null 2>&1; do : ; done
-      fi
-      if [ ! -e /etc/config.rc ]; then
-        mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-          mount -n -t $FSTYPE /etc /etc
-      fi
-      (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
-      # first, we want to remove all directories from /etc which are replaced
-      # by something not a directory in the archive (typically a symlink). Directories
-      # in the file must not be removed since they may carry only few files.
-      tar --exclude-from $EXCLUDE -ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
-      tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf $config >/dev/null 2>&1
-      if [ $? -eq 0 -a -s /etc/config.rc ]; then
-        copy_fstab_from_flash
-        umount_flash
-        ( rm -f /etc/blkid.tab{,.old}; \
-          rm -f $FILE ; touch $FILE ; chmod 600 $FILE; \
-          flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
-        echo ${config##*/}
-        exit 0
-      fi
-      while umount /etc >/dev/null 2>&1; do : ; done
+    if try_restore_config "$config"; then
+      copy_fstab_from_flash
+      umount_flash
+      exit 0
     fi
   done
-  must_unmount=1
-  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
 fi
 
 # We have not found any config, so we'll build /etc from the reference etc
 # directory into a ramfs/tmpfs anyway so that we get a read/write /etc.
-if [ -e /etc/config.rc ]; then
-  while umount /etc >/dev/null 2>&1; do : ; done
-fi
-if [ ! -e /etc/config.rc ]; then
-  mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-    mount -n -t $FSTYPE /etc /etc 2>/dev/null || exit 1  # already mounted
-fi
-(tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
-( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
-( copy_fstab_from_flash ) >/dev/null 2>&1
-[ $must_unmount -eq 0 ] || umount_flash
+unmount_etc
+mount_etc
+reinstall_factory_etc
+copy_fstab_from_flash >/dev/null 2>&1
+update_signature_file
 
-( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) >/dev/null 2>&1
-rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+[ $must_unmount -eq 0 ] || umount_flash
 exit 1
