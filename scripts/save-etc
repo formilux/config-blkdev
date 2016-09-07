@@ -17,6 +17,7 @@ FORCE=0
 VERBOSE=0
 STDOUT=0
 QUIET=0
+DIFF=0
 LIST=0
 TOFILE=0
 TONET=0
@@ -117,6 +118,16 @@ archive_etc() {
     | gzip -c9
 }
 
+# emits a diff between factory and /etc on stdout. Note that tar is only used
+# to comply with ignore-files here.
+diff_etc() {
+  flx check --ignore-dot --ignore-link --ignore-date $REFERENCE=etc /etc=etc \
+    | awk '/^[+>]/ { print $9 }' \
+    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
+    | tar tf - \
+    | while read; do diff -puN ${REFERENCE}${REPLY#etc} /etc${REPLY#etc}; done
+}
+
 # creates a secure empty temporary directory and returns its full path name.
 # Returns 0 if it succeeds, with the name on stdout, otherwise returns 1.
 mkstemp() {
@@ -165,6 +176,7 @@ while [ $# -gt 0 ]; do
   elif [ ".$1" = ".-q" ]; then QUIET=1
   elif [ ".$1" = ".-s" ]; then STDOUT=1
   elif [ ".$1" = ".-l" ]; then LIST=1
+  elif [ ".$1" = ".-d" ]; then DIFF=1
   elif [ ".$1" = ".-o" -a -n "$2" ]; then
     TOFILE=1
     OUTFILE="$2"
@@ -178,6 +190,7 @@ while [ $# -gt 0 ]; do
     echo "Unknown argument: $1"
     echo "Valid options are :"
     echo "  -f : force write even if up-to-date ;"
+    echo "  -d : only emit a diff from factory config ;"
     echo "  -v : only check whether files have been modified ;"
     echo "  -l : (with -v) use listing output format (no headers) ;"
     echo "  -q : suppress any message. With -v, return non-0 if unsaved changes exist ;"
@@ -215,6 +228,15 @@ if [ $VERBOSE -eq 1 ]; then
     [ $LIST -eq 0 ] && echo "Backup log does not exist."
     exit 1
   fi
+fi
+
+if [ $DIFF -eq 1 ]; then
+  if [ $TOFILE -eq 1 ]; then
+    diff_etc > "$OUTFILE"
+  else
+    diff_etc
+  fi
+  exit 0
 fi
 
 if [ $FORCE -eq 0 -a $STDOUT -eq 0 -a $TOFILE -eq 0 -a $TONET -eq 0 -a -e $FILE ] && \
