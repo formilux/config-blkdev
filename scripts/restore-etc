@@ -192,6 +192,50 @@ try_restore_config() {
   return 1
 }
 
+# restore everything taking into account the command line options.
+restore_config() {
+  local must_unmount=0
+
+  # restore factory settings only ?
+  if [ $FACTORY -eq 1 ]; then
+    unmount_etc
+    mount_etc
+    reinstall_factory_etc
+    update_signature_file
+    return 0
+  fi
+
+  # restore from local file ?
+  if [ -n "$CFGFILE" ]; then
+    try_restore_config "$CFGFILE"
+    return $?
+  fi
+
+  # if we get any error there, we try to restore the flash configuration.
+  if mount_flash_ro; then
+    must_unmount=1
+    for config in $FLASHCFG/config.cur $FLASHCFG/config.bak $FLASHCFG/config.fac
+    do
+      if try_restore_config "$config"; then
+        copy_fstab_from_flash
+        umount_flash
+        return 0
+      fi
+    done
+  fi
+
+  # We have not found any config, so we'll build /etc from the reference etc
+  # directory into a ramfs/tmpfs anyway so that we get a read/write /etc.
+  unmount_etc
+  mount_etc
+  reinstall_factory_etc
+  copy_fstab_from_flash >/dev/null 2>&1
+  update_signature_file
+
+  [ $must_unmount -eq 0 ] || umount_flash
+  return 1
+}
+
 #### main entry point
 
 if ! grep -wq tmpfs /proc/filesystems 2>/dev/null; then
@@ -239,42 +283,5 @@ if [ $FORCE -eq 0 -a -e "$ROOTDIR$FILE" ] && \
   exit 1;
 fi 
 
-# restore factory settings only ?
-if [ $FACTORY -eq 1 ]; then
-  unmount_etc
-  mount_etc
-  reinstall_factory_etc
-  update_signature_file
-  exit 0
-fi
-
-# restore from local file ?
-if [ -n "$CFGFILE" ]; then
-  try_restore_config "$CFGFILE"
-  exit $?
-fi
-
-# if we get any error there, we try to restore the flash configuration.
-must_unmount=0
-if mount_flash_ro; then
-  must_unmount=1
-  for config in $FLASHCFG/config.cur $FLASHCFG/config.bak $FLASHCFG/config.fac
-  do
-    if try_restore_config "$config"; then
-      copy_fstab_from_flash
-      umount_flash
-      exit 0
-    fi
-  done
-fi
-
-# We have not found any config, so we'll build /etc from the reference etc
-# directory into a ramfs/tmpfs anyway so that we get a read/write /etc.
-unmount_etc
-mount_etc
-reinstall_factory_etc
-copy_fstab_from_flash >/dev/null 2>&1
-update_signature_file
-
-[ $must_unmount -eq 0 ] || umount_flash
-exit 1
+restore_config
+exit $?
