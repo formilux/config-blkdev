@@ -17,6 +17,7 @@ FILE=/etc/.restored
 EXCLUDE=/usr/share/factory/ignore-files
 REFERENCE=/usr/share/factory/base-etc
 FORCE=0
+FACTORY=0
 VERBOSE=0
 CFGFILE=
 MOUNTOPT="size=2m"
@@ -198,12 +199,14 @@ fi
 
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
+  elif [ ".$1" = ".-F" ]; then FACTORY=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
   elif [ ".$1" = ".-t" ]; then FSTYPE="$2"; shift
   elif [ ".$1" = ".-o" ]; then MOUNTOPT="$2"; shift
   elif [ "${1}" != "-" -a -z "${1##-*}" ]; then
     echo "Unknown argument: $1"
     echo "Valid options are :"
+    echo "  -F : restore config to factory settings only ;"
     echo "  -f : force update and ignore local changes ;"
     echo "  -v : only check whether files have been modified ;"
     echo "  -t <fstype> : force to use a filesystem of this type ;"
@@ -234,6 +237,15 @@ if [ $FORCE -eq 0 -a -e $FILE ] && \
   echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
   exit 1;
 fi 
+
+# restore factory settings only ?
+if [ $FACTORY -eq 1 ]; then
+  unmount_etc
+  mount_etc
+  reinstall_factory_etc
+  update_signature_file
+  exit 0
+fi
 
 # restore from local file ?
 if [ -n "$CFGFILE" ]; then
