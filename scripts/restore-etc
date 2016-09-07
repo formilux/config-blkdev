@@ -22,6 +22,7 @@ VERBOSE=0
 CFGFILE=
 MOUNTOPT="size=2m"
 FSTYPE=tmpfs
+ROOTDIR=
 
 # Mounts the flash in $FLASHDIR.
 # This checks /proc/cmdline for the LAST 'flash=' statement, and
@@ -86,10 +87,10 @@ umount_flash() {
 
 # copies /flash/fstab to /etc if /etc/fstab is missing
 copy_fstab_from_flash() {
-  if [ ! -s /etc/fstab -a -s $FLASHDIR/fstab ]; then
+  if [ ! -s "$ROOTDIR/etc/fstab" -a -s "$FLASHDIR/fstab" ]; then
     # missing fstab and we have one lying in /flash. This is the one we want to use.
     echo "Note: using original fstab until configuration is saved."
-    cp $FLASHDIR/fstab /etc/fstab && chown root:adm /etc/fstab && chmod 640 /etc/fstab
+    cp $FLASHDIR/fstab "$ROOTDIR/etc/fstab" && chown root:adm "$ROOTDIR/etc/fstab" && chmod 640 "$ROOTDIR/etc/fstab"
   fi
 }
 
@@ -114,12 +115,12 @@ mkstemp() {
 # The changed files are listed on stdout, relative to /.
 # WARNING! because it uses tar, it does not detect removed files.
 list_changes() {
-  if [ -r "$FILE" ]; then
-    flx check --ignore-dot --ignore-link --ignore-date file:$FILE fs:/etc \
+  if [ -r "$ROOTDIR$FILE" ]; then
+    flx check --ignore-dot --ignore-link --ignore-date file:"$ROOTDIR$FILE" fs:"$ROOTDIR/etc"=etc \
       | awk '/^[+>]/ { print $9 }' \
-      | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+      | tar -C "$ROOTDIR/" -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
   else
-      tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
+      tar -C "$ROOTDIR/" --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
   fi
 }
 
@@ -133,27 +134,27 @@ function die {
 
 # tries to unmount /etc
 unmount_etc() {
-  while umount /etc >/dev/null 2>&1; do : ; done
+  while umount "$ROOTDIR/etc" >/dev/null 2>&1; do : ; done
 }
 
 # mount /etc unless config.rc already exists
 mount_etc() {
-  if [ ! -e /etc/config.rc ]; then
-    mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} /etc /etc || \
-      mount -n -t $FSTYPE /etc /etc
+  if [ ! -e "$ROOTDIR/etc/config.rc" ]; then
+    mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} "$ROOTDIR/etc" "$ROOTDIR/etc" || \
+      mount -n -t $FSTYPE "$ROOTDIR/etc" "$ROOTDIR/etc"
   fi
 }
 
 # restore only the factory configuration over /etc
 reinstall_factory_etc() {
-  (tar -C $REFERENCE --one-file-system -cf - . | tar -C /etc -xf -) >/dev/null 2>&1
+  (tar -C $REFERENCE --one-file-system -cf - . | tar -C "$ROOTDIR/etc" -xf -) >/dev/null 2>&1
 }
 
 # rebuild the signature file after /etc has been restored
 update_signature_file() {
-  ( rm -f /etc/blkid.tab{,.old}; \
-    rm -f "$FILE" ; touch "$FILE" ; chmod 600 "$FILE"; \
-    flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >"$FILE" ) >/dev/null 2>&1
+  ( rm -f "$ROOTDIR"/etc/blkid.tab{,.old}; \
+    rm -f "$ROOTDIR$FILE" ; touch "$ROOTDIR$FILE" ; chmod 600 "$ROOTDIR$FILE"; \
+    flx sign --ignore-dot "$ROOTDIR/etc"=etc | grep -vwF "${FILE#/}" >"$ROOTDIR$FILE" ) >/dev/null 2>&1
 }
 
 # try to restore file $1 to /etc. If "$1" is "-", stdin is used via a temporary
@@ -176,9 +177,9 @@ try_restore_config() {
     # first, we want to remove all directories from /etc which are replaced
     # by something not a directory in the archive (typically a symlink). Directories
     # in the file must not be removed since they may carry only few files.
-    tar --exclude-from $EXCLUDE -ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd / && xargs -r0 rm -rf) 2>&1
-    tar -C /etc --exclude-from $EXCLUDE --strip-components=1 -zxf "$config" >/dev/null 2>&1
-    if [ $? -eq 0 -a -s /etc/config.rc ]; then
+    tar --exclude-from $EXCLUDE -ztf "$config" etc/ | grep -v '/$' | tr '\012' '\000' | (cd "$ROOTDIR/" && xargs -r0 rm -rf) 2>&1
+    tar -C "$ROOTDIR/etc" --exclude-from $EXCLUDE --strip-components=1 -zxf "$config" >/dev/null 2>&1
+    if [ $? -eq 0 -a -s "$ROOTDIR/etc/config.rc" ]; then
       update_signature_file
       echo "$config"
       [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
@@ -187,7 +188,7 @@ try_restore_config() {
     unmount_etc
   fi
   [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
-  rm -f /etc/blkid.tab{,.old} >/dev/null 2>&1
+  rm -f "$ROOTDIR"/etc/blkid.tab{,.old} >/dev/null 2>&1
   return 1
 }
 
@@ -227,12 +228,12 @@ fi
 
 if [ $VERBOSE -eq 1 ]; then
   echo "List of files modified since last backup."
-  rm -f /etc/blkid.tab{,.old} 2>/dev/null
-  flx check --ignore-dot file:$FILE fs:/etc | grep -vwF "${FILE#/}"
+  rm -f "$ROOTDIR"/etc/blkid.tab{,.old} 2>/dev/null
+  flx check --ignore-dot file:"$ROOTDIR$FILE" fs:"$ROOTDIR/etc"=etc | grep -vwF "${FILE#/}"
   exit 0
 fi
 
-if [ $FORCE -eq 0 -a -e $FILE ] && \
+if [ $FORCE -eq 0 -a -e "$ROOTDIR$FILE" ] && \
    [ $(list_changes | wc -l) -gt 0 ]; then
   echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
   exit 1;
