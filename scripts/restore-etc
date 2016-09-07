@@ -16,6 +16,7 @@ FLASHCFG=${FLASHDIR}/cfg
 FILE=/etc/.restored
 EXCLUDE=/usr/share/factory/ignore-files
 REFERENCE=/usr/share/factory/base-etc
+DIFF=0
 FORCE=0
 FACTORY=0
 VERBOSE=0
@@ -167,8 +168,10 @@ try_restore_config() {
   fi
 
   if [ -s "$config" ] && [ $(tar ztf "$config" 2>/dev/null|wc -l) -gt 0 ]; then
-    unmount_etc
-    mount_etc
+    if [ $DIFF -ne 1 ]; then
+      unmount_etc
+      mount_etc
+    fi
     reinstall_factory_etc
     # first, we want to remove all directories from /etc which are replaced
     # by something not a directory in the archive (typically a symlink). Directories
@@ -181,7 +184,7 @@ try_restore_config() {
       [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
       return 0
     fi
-    unmount_etc
+    [ $DIFF -eq 1 ] || unmount_etc
   fi
   [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
   rm -f "$ROOTDIR"/etc/blkid.tab{,.old} >/dev/null 2>&1
@@ -194,8 +197,10 @@ restore_config() {
 
   # restore factory settings only ?
   if [ $FACTORY -eq 1 ]; then
-    unmount_etc
-    mount_etc
+    if [ $DIFF -ne 1 ]; then
+      unmount_etc
+      mount_etc
+    fi
     reinstall_factory_etc
     update_signature_file
     return 0
@@ -222,8 +227,10 @@ restore_config() {
 
   # We have not found any config, so we'll build /etc from the reference etc
   # directory into a ramfs/tmpfs anyway so that we get a read/write /etc.
-  unmount_etc
-  mount_etc
+  if [ $DIFF -ne 1 ]; then
+    unmount_etc
+    mount_etc
+  fi
   reinstall_factory_etc
   copy_fstab_from_flash >/dev/null 2>&1
   update_signature_file
@@ -240,6 +247,7 @@ fi
 
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
+  elif [ ".$1" = ".-d" ]; then DIFF=1
   elif [ ".$1" = ".-F" ]; then FACTORY=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
   elif [ ".$1" = ".-t" ]; then FSTYPE="$2"; shift
@@ -248,6 +256,7 @@ while [ $# -gt 0 ]; do
     echo "Unknown argument: $1"
     echo "Valid options are :"
     echo "  -F : restore config to factory settings only ;"
+    echo "  -d : only emit a diff between flash and running config ;"
     echo "  -f : force update and ignore local changes ;"
     echo "  -v : only check whether files have been modified ;"
     echo "  -t <fstype> : force to use a filesystem of this type ;"
@@ -273,11 +282,31 @@ if [ $VERBOSE -eq 1 ]; then
   exit 0
 fi
 
-if [ $FORCE -eq 0 -a -e "$ROOTDIR$FILE" ] && \
+if [ $DIFF -eq 0 -a $FORCE -eq 0 -a -e "$ROOTDIR$FILE" ] && \
    [ $(list_changes | wc -l) -gt 0 ]; then
   echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
   exit 1;
 fi 
+
+if [ $DIFF -eq 1 ]; then
+  ROOTDIR="$(mkstemp)" && mkdir -p "$ROOTDIR/etc"
+  if [ $? -ne 0 ]; then
+    echo "Cannot create a temporary directory in '${TMPDIR-/tmp}'." >&2
+    exit 1
+  fi
+  restore_config
+
+  flx check --ignore-dot --ignore-link --ignore-date "$ROOTDIR"/etc=etc /etc=etc \
+    | awk '/^[+>]/ { print $9 }' \
+    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
+    | tar tf - \
+    | while read; do diff -puN "$ROOTDIR/etc"${REPLY#etc} /etc${REPLY#etc}; done
+
+  # remove the temporary dir. Better add some checks to avoid a dangerous
+  # reuse of this code our of context...
+  [ -n "$ROOTDIR" -a "$ROOTDIR" != "/" ] && rm -rf "$ROOTDIR"
+  exit 0
+fi
 
 restore_config
 exit $?
