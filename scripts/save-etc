@@ -118,14 +118,14 @@ archive_etc() {
     | gzip -c9
 }
 
-# emits a diff between factory and /etc on stdout. Note that tar is only used
-# to comply with ignore-files here.
+# emits a diff between factory and /etc on stdout.
 diff_etc() {
   flx check --ignore-dot --ignore-link --ignore-date $REFERENCE=etc /etc=etc \
-    | awk '/^[+>]/ { print $9 }' \
-    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
-    | tar tf - \
-    | while read; do diff -puN ${REFERENCE}${REPLY#etc} /etc${REPLY#etc}; done
+    | awk '/^. [^d]/ { print $9 }' | sort -u \
+    | while read; do
+        grep -qxF "$REPLY" "$EXCLUDE" && continue
+        diff --label="factory/${REPLY}" --label="running/${REPLY}" -puN "${REFERENCE}${REPLY#etc}" "/etc${REPLY#etc}"
+      done
 }
 
 # creates a secure empty temporary directory and returns its full path name.

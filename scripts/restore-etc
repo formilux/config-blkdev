@@ -297,10 +297,11 @@ if [ $DIFF -eq 1 ]; then
   restore_config
 
   flx check --ignore-dot --ignore-link --ignore-date "$ROOTDIR"/etc=etc /etc=etc \
-    | awk '/^[+>]/ { print $9 }' \
-    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
-    | tar tf - \
-    | while read; do diff -puN "$ROOTDIR/etc"${REPLY#etc} /etc${REPLY#etc}; done
+    | awk '/^. [^d]/ { print $9 }' | sort -u \
+    | while read; do
+        grep -qxF "$REPLY" "$EXCLUDE" && continue
+        diff --label="flash/${REPLY}" --label="running/${REPLY}" -puN "$ROOTDIR/etc"${REPLY#etc} /etc${REPLY#etc}
+      done
 
   # remove the temporary dir. Better add some checks to avoid a dangerous
   # reuse of this code our of context...
