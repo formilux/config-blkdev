@@ -124,14 +124,6 @@ list_changes() {
   fi
 }
 
-# kills the program and outputs an error if provided.
-function die {
-    local ret="$1"
-    shift
-    [ -n "$*" ] && echo "$@" >&2
-    exit $ret
-}
-
 # tries to unmount /etc
 unmount_etc() {
   while umount "$ROOTDIR/etc" >/dev/null 2>&1; do : ; done
@@ -165,7 +157,11 @@ try_restore_config() {
 
   if [ "$config" = "-" ]; then
     # restore from stdin
-    temp_cfg_dir="$(mkstemp)" || die 1 "Cannot create a temporary directory in '${TMPDIR-/tmp}'."
+    temp_cfg_dir="$(mkstemp)"
+    if [ $? -ne 0 ]; then
+      echo "Cannot create a temporary directory in '${TMPDIR-/tmp}'." >&2
+      return 1
+    fi
     config="$temp_cfg_dir/stdin"
     cat > "$temp_cfg_dir/stdin"
   fi
