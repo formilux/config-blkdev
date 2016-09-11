@@ -125,16 +125,22 @@ list_changes() {
   fi
 }
 
-# tries to unmount /etc
+# tries to unmount /etc and to delete everything there if / is a ramfs
 unmount_etc() {
   while umount "$ROOTDIR/etc" >/dev/null 2>&1; do : ; done
+  if [ "$(stat -fc "%T" "$ROOTDIR/" 2>/dev/null)" = "ramfs" ]; then
+    rm -rf "$ROOTDIR/etc/." >/dev/null 2>&1
+  fi
 }
 
-# mount /etc unless config.rc already exists
+# mount /etc unless config.rc already exists or / is a ramfs
 mount_etc() {
   if [ ! -e "$ROOTDIR/etc/config.rc" ]; then
-    mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} "$ROOTDIR/etc" "$ROOTDIR/etc" || \
-      mount -n -t $FSTYPE "$ROOTDIR/etc" "$ROOTDIR/etc"
+    mkdir -p "$ROOTDIR/etc" >/dev/null 2>&1
+    if [ "$(stat -fc "%T" "$ROOTDIR/" 2>/dev/null)" != "ramfs" ]; then
+      mount -n -t $FSTYPE ${MOUNTOPT:+-o $MOUNTOPT} "$ROOTDIR/etc" "$ROOTDIR/etc" || \
+        mount -n -t $FSTYPE "$ROOTDIR/etc" "$ROOTDIR/etc"
+    fi
   fi
 }
 
