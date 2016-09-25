@@ -16,6 +16,7 @@ FLASHCFG=${FLASHDIR}/cfg
 FILE=/etc/.restored
 EXCLUDE=/usr/share/factory/ignore-files
 REFERENCE=/usr/share/factory/base-etc
+SETTINGS=/usr/share/factory/settings
 DIFF=0
 FORCE=0
 FACTORY=0
@@ -250,6 +251,20 @@ restore_config() {
 if ! grep -wq tmpfs /proc/filesystems 2>/dev/null; then
   FSTYPE=ramfs
 fi
+
+# Usage: get_settings $PROG $SETTING
+# If setting is found, returns 0 with the first value in $REPLY, otherwise 1.
+# Please note that an empty value found is different from no entry.
+get_settings() {
+	[ -s "$SETTINGS" ] || return 1
+	REPLY=$(sed -n "/^$1\/$2=/{s|^$1/$2=|=|p;Q}" "$SETTINGS") || return 1
+	[ -n "$REPLY" ] || return 1
+	REPLY="${REPLY#=}"
+}
+
+get_settings "${0##*/}" fstype && FSTYPE="$REPLY"
+get_settings "${0##*/}" mountopt && MOUNTOPT="$REPLY"
+
 
 while [ $# -gt 0 ]; do
   if [ ".$1" = ".-f" ]; then FORCE=1
