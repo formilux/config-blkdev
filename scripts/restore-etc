@@ -153,7 +153,7 @@ reinstall_factory_etc() {
 # rebuild the signature file after /etc has been restored
 update_signature_file() {
   ( rm -f "$ROOTDIR"/etc/blkid.tab{,.old}; \
-    rm -f "$ROOTDIR$FILE" ; touch "$ROOTDIR$FILE" ; chmod 600 "$ROOTDIR$FILE"; \
+    rm -f "$ROOTDIR$FILE" ; touch "$ROOTDIR$FILE" ; chown 0:4 "$ROOTDIR$FILE" ; chmod 640 "$ROOTDIR$FILE"; \
     flx sign --ignore-dot "$ROOTDIR/etc"=etc | grep -vwF "${FILE#/}" >"$ROOTDIR$FILE" ) >/dev/null 2>&1
 }
 

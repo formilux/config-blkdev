@@ -339,6 +339,6 @@ fi
 umount_flash
 sync
 
-( rm -f $FILE ; touch $FILE ; chmod 600 $FILE ) >/dev/null 2>&1
+( rm -f $FILE ; touch $FILE ; chown 0:4 $FILE; chmod 640 $FILE ) >/dev/null 2>&1
 ( flx sign --ignore-dot /etc | grep -vwF "${FILE#/}" >$FILE ) 2>/dev/null
 exit 0
