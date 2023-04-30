@@ -316,6 +316,11 @@ if [ $DIFF -eq 1 ]; then
     exit 1
   fi
   restore_config
+  if [ $? -ne 0 ]; then
+    echo "Cannot load the current config from the flash." >&2
+    [ -n "$ROOTDIR" -a "$ROOTDIR" != "/" ] && rm -rf "$ROOTDIR"
+    exit 1
+  fi
 
   flx check --ignore-dot --ignore-link --ignore-date "$ROOTDIR"/etc=etc /etc=etc \
     | awk '/^. [^d]/ { print $9 }' | sort -u \
