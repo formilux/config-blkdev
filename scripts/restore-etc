@@ -21,6 +21,7 @@ DIFF=0
 FORCE=0
 FACTORY=0
 VERBOSE=0
+QUIET=0
 CFGFILE=
 MOUNTOPT="size=10m"
 FSTYPE=tmpfs
@@ -63,7 +64,7 @@ mount_flash_ro() {
     flash=$FLASH_SW
   fi
 
-  echo "Mounting ${flash} on $FLASHDIR..." >&2
+  [ $QUIET -eq 1 ] || echo "Mounting ${flash} on $FLASHDIR..." >&2
   cd /
   umount -n -d $FLASHDIR >/dev/null 2>&1
   if ! mount -n -r $flash $FLASHDIR >/dev/null 2>&1; then
@@ -81,7 +82,7 @@ umount_flash() {
       echo "Error: cannot unmount $FLASHDIR" >&2
       return 1
     else
-      echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it." >&2
+      [ $QUIET -eq 1 ] || echo "Warning: ${0##*/} forgot to leave $FLASHDIR before unmounting it." >&2
     fi
   fi
   return 0
@@ -91,7 +92,7 @@ umount_flash() {
 copy_fstab_from_flash() {
   if [ ! -s "$ROOTDIR/etc/fstab" -a -s "$FLASHDIR/fstab" ]; then
     # missing fstab and we have one lying in /flash. This is the one we want to use.
-    echo "Note: using original fstab until configuration is saved." >&2
+    [ $QUIET -eq 1 ] || echo "Note: using original fstab until configuration is saved." >&2
     cp $FLASHDIR/fstab "$ROOTDIR/etc/fstab" && chown root:adm "$ROOTDIR/etc/fstab" && chmod 640 "$ROOTDIR/etc/fstab"
   fi
 }
@@ -187,7 +188,7 @@ try_restore_config() {
     tar -C "$ROOTDIR/etc" --exclude-from $EXCLUDE --strip-components=1 -zxf "$config" >/dev/null 2>&1
     if [ $? -eq 0 -a -s "$ROOTDIR/etc/config.rc" ]; then
       update_signature_file
-      echo "Loading $config" >&2
+      [ $QUIET -eq 1 ] || echo "Loading $config" >&2
       [ -n "$temp_cfg_dir" ] && rm -rf "$temp_cfg_dir"
       return 0
     fi
@@ -271,6 +272,7 @@ while [ $# -gt 0 ]; do
   elif [ ".$1" = ".-d" ]; then DIFF=1
   elif [ ".$1" = ".-F" ]; then FACTORY=1
   elif [ ".$1" = ".-v" ]; then VERBOSE=1
+  elif [ ".$1" = ".-q" ]; then QUIET=1
   elif [ ".$1" = ".-t" ]; then FSTYPE="$2"; shift
   elif [ ".$1" = ".-o" ]; then MOUNTOPT="$2"; shift
   elif [ "${1}" != "-" -a -z "${1##-*}" ]; then
@@ -279,6 +281,7 @@ while [ $# -gt 0 ]; do
     echo "  -F : restore config to factory settings only ;"
     echo "  -d : only emit a diff between flash and running config ;"
     echo "  -f : force update and ignore local changes ;"
+    echo "  -q : quiet mode: do not indicate progress ;"
     echo "  -v : only check whether files have been modified ;"
     echo "  -t <fstype> : force to use a filesystem of this type ;"
     echo "  -o <opts>   : use these mount options (default: $MOUNTOPT) ;"
@@ -297,7 +300,7 @@ if [ $# -gt 0 ]; then
 fi
 
 if [ $VERBOSE -eq 1 ]; then
-  echo "List of files modified since last backup."
+  [ $QUIET -eq 1 ] || echo "List of files modified since last backup."
   rm -f "$ROOTDIR"/etc/blkid.tab{,.old} 2>/dev/null
   flx check --ignore-dot file:"$ROOTDIR$FILE" fs:"$ROOTDIR/etc"=etc | grep -vwF "${FILE#/}"
   exit 0
@@ -305,11 +308,12 @@ fi
 
 if [ $DIFF -eq 0 -a $FORCE -eq 0 -a -e "$ROOTDIR$FILE" ] && \
    [ $(list_changes | wc -l) -gt 0 ]; then
-  echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
+  [ $QUIET -eq 1 ] || echo "Some files have changed since last backup. Check them with '-v' or use '-f'."
   exit 1;
 fi 
 
 if [ $DIFF -eq 1 ]; then
+  QUIET=1
   ROOTDIR="$(mkstemp)" && mkdir -p "$ROOTDIR/etc"
   if [ $? -ne 0 ]; then
     echo "Cannot create a temporary directory in '${TMPDIR-/tmp}'." >&2
