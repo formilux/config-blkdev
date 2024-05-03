@@ -114,7 +114,7 @@ write_journal()
 archive_etc() {
   flx check --ignore-dot --ignore-link --ignore-date $REFERENCE=etc /etc=etc \
     | awk '/^[+>]/ { print $9 }' \
-    | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cf - \
+    | tar -C / --no-recursion --exclude-from $EXCLUDE --one-file-system --numeric-owner -T - -cf - \
     | gzip -c9
 }
 
@@ -152,7 +152,7 @@ list_changes() {
   if [ -r "$FILE" ]; then
     flx check --ignore-dot --ignore-link --ignore-date file:$FILE fs:/etc \
       | awk '/^[+>]/ { print $9 }' \
-      | tar -C / -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+      | tar -C / --no-recursion --exclude-from $EXCLUDE --one-file-system --numeric-owner -T - -cvf /dev/null 2>/dev/null
   else
       tar -C / --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
   fi

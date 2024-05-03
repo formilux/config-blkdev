@@ -121,7 +121,7 @@ list_changes() {
   if [ -r "$ROOTDIR$FILE" ]; then
     flx check --ignore-dot --ignore-link --ignore-date file:"$ROOTDIR$FILE" fs:"$ROOTDIR/etc"=etc \
       | awk '/^[+>]/ { print $9 }' \
-      | tar -C "$ROOTDIR/" -T - --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -cvf /dev/null 2>/dev/null
+      | tar -C "$ROOTDIR/" --one-file-system --numeric-owner --no-recursion --exclude-from $EXCLUDE -T - -cvf /dev/null 2>/dev/null
   else
       tar -C "$ROOTDIR/" --one-file-system --numeric-owner --exclude-from $EXCLUDE -cvf /dev/null etc 2>/dev/null
   fi
